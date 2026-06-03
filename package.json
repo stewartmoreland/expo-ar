@@ -26,9 +26,12 @@
   "author": "Stewart Moreland <stewartmoreland@users.noreply.github.com> (https://github.com/stewartmoreland)",
   "license": "MIT",
   "homepage": "https://github.com/stewartmoreland/expo-ar#readme",
-  "dependencies": {},
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
   "devDependencies": {
     "@babel/core": "^7.26.0",
+    "@testing-library/react-native": "^13.3.3",
     "@types/jest": "^29.2.1",
     "@types/react": "~19.1.1",
     "babel-preset-expo": "~55.0.8",
@@ -39,10 +42,12 @@
     "jest-expo": "~55.0.9",
     "prettier": "^3.0.0",
     "react-native": "0.82.1",
+    "react-test-renderer": "19.2.7",
     "typescript": "^5.9.2"
   },
   "jest": {
     "preset": "jest-expo",
+    "globalSetup": "<rootDir>/jest.globalSetup.js",
     "roots": [
       "<rootDir>/src"
     ]
