@@ -9,10 +9,22 @@ version = '0.1.0'
 android {
   namespace "expo.modules.ar"
   defaultConfig {
+    // ARCore + SceneView (Filament) require API 24+.
+    minSdkVersion 24
     versionCode 1
     versionName "0.1.0"
   }
   lintOptions {
     abortOnError false
   }
+}
+
+dependencies {
+  // ARCore session/tracking/anchors. Pinned to the version SceneView 2.3.0 is built
+  // against, so the two resolve without conflict.
+  implementation "com.google.ar:core:1.48.0"
+
+  // SceneView ARSceneView — the ARCore-backed Filament renderer for the AR view.
+  // 2.3.0 targets Kotlin 2.0.21, matching Expo SDK 56's default Kotlin version.
+  implementation "io.github.sceneview:arsceneview:2.3.0"
 }

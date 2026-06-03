@@ -22,6 +22,15 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      [
+        "../app.plugin.js",
+        {
+          "cameraPermission": "Allow $(PRODUCT_NAME) to use the camera for AR.",
+          "arRequired": false
+        }
+      ]
+    ]
   }
 }
