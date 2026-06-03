@@ -1,15 +1,17 @@
 Pod::Spec.new do |s|
   s.name           = 'ExpoAr'
-  s.version        = '1.0.0'
-  s.summary        = 'A sample project summary'
-  s.description    = 'A sample project description'
-  s.author         = ''
-  s.homepage       = 'https://docs.expo.dev/modules/'
+  s.version        = '0.1.0'
+  s.summary        = 'Augmented Reality module bridging iOS ARKit and Android ARCore'
+  s.description    = 'A single React Native AR view backed by ARKit (iOS) and ARCore (Android) behind one shared TypeScript contract.'
+  s.author         = 'Stewart Moreland'
+  s.homepage       = 'https://github.com/stewartmoreland/expo-ar'
+  s.license        = { :type => 'MIT', :file => '../LICENSE' }
+  # ARKit world tracking is iOS-only; 15.0 is a safe floor that still covers the
+  # LiDAR scene-reconstruction APIs (available since 13.4).
   s.platforms      = {
-    :ios => '16.4',
-    :tvos => '16.4'
+    :ios => '15.0'
   }
-  s.source         = { git: '' }
+  s.source         = { git: 'https://github.com/stewartmoreland/expo-ar.git', tag: "v#{s.version}" }
   s.static_framework = true
 
   s.dependency 'ExpoModulesCore'
