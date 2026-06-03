@@ -1,16 +1,16 @@
-import {
-  ExpoArView,
-  getCapabilities,
-  useArSession,
-  type Capabilities,
-  type TapEvent,
-} from 'expo-ar';
-import { useMemo } from 'react';
+import { ExpoArView, getCapabilities, type Capabilities, type TapEvent } from 'expo-ar';
+import { useMemo, useState } from 'react';
 import { Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 
-// Dev harness for the expo-ar core (GH #3 / #4). The milestone this exercises: a blank,
-// tracking AR view with onReady + onTrackingStateChange firing, plus the raycast/anchor
-// primitives. Run on a PHYSICAL device — ARKit/ARCore don't run in a simulator/emulator.
+import { MeasureHUD } from './features/MeasureHUD';
+import { PlacementHUD } from './features/PlacementHUD';
+import { type MeasureMode, type Unit } from './features/measurement';
+import { useArMeasure } from './features/useArMeasure';
+import { useArPlacement } from './features/useArPlacement';
+
+// Dev harness for the expo-ar core (GH #5, phase 5). Two worked features — measurement
+// and tap-to-place — composed on the SAME core (session/tracking/raycast/anchors), proving
+// it's use-case-agnostic. Run on a PHYSICAL device — ARKit/ARCore don't run in a simulator.
 export default function App() {
   // Sync capability probe BEFORE mounting the view, so unsupported devices (and web)
   // branch to a non-AR fallback instead of rendering a dead AR surface.
@@ -32,48 +32,37 @@ export default function App() {
     );
   }
 
-  return <ArHarness />;
+  return <ArRoot />;
 }
 
-function ArHarness() {
-  const session = useArSession();
+type DemoMode = 'measure' | 'place';
 
-  // Tap → place an anchor at the hit point. addAnchor raycasts + creates the anchor and
-  // fires onAnchorsChange, which the hook folds into `anchors`.
-  const onTap = (e: { nativeEvent: TapEvent }) => {
-    session.ref.current?.addAnchor(e.nativeEvent.x, e.nativeEvent.y).catch(() => {
-      /* no surface at point — onError already fired */
-    });
-  };
+// Owns the demo selector. Conditionally renders EXACTLY ONE demo (and thus exactly one
+// <ExpoArView> / one AR session) at a time — AR allows only one active session app-wide,
+// so switching unmounts the old view (releasing the camera) before mounting the new one.
+function ArRoot() {
+  const [mode, setMode] = useState<DemoMode>('measure');
 
   return (
     <View style={styles.container}>
-      <ExpoArView
-        ref={session.ref}
-        style={StyleSheet.absoluteFill}
-        planeDetection="both"
-        depthEnabled
-        debug
-        onTap={onTap}
-        {...session.handlers}
-      />
+      {mode === 'measure' ? <MeasureDemo /> : <PlacementDemo />}
 
-      {/* 2D HUD drawn over the native AR view as normal RN elements. */}
-      <SafeAreaView style={styles.hud} pointerEvents="box-none">
-        <View style={styles.statusCard} pointerEvents="none">
-          <Text style={styles.statusText}>tracking: {session.tracking}</Text>
-          <Text style={styles.statusText}>ready: {session.ready ? 'yes' : 'no'}</Text>
-          <Text style={styles.statusText}>anchors: {session.anchors.length}</Text>
-          <Text style={styles.statusText}>
-            depth/LiDAR: {session.caps?.depthOrLidarAvailable ? 'yes' : 'no'}
-          </Text>
-          {session.error ? <Text style={styles.errorText}>error: {session.error}</Text> : null}
-          {!session.ready ? <Text style={styles.hint}>Move the device to start tracking…</Text> : null}
-        </View>
-
-        <View style={styles.controls}>
-          <Pressable style={styles.button} onPress={session.reset}>
-            <Text style={styles.buttonText}>Reset</Text>
+      {/* Segmented switcher persists across the demo swap and is the single source of mode. */}
+      <SafeAreaView style={styles.switcherWrap} pointerEvents="box-none">
+        <View style={styles.segment}>
+          <Pressable
+            style={[styles.segmentItem, mode === 'measure' && styles.segmentItemActive]}
+            onPress={() => setMode('measure')}>
+            <Text style={[styles.segmentTxt, mode === 'measure' && styles.segmentTxtActive]}>
+              Measure
+            </Text>
+          </Pressable>
+          <Pressable
+            style={[styles.segmentItem, mode === 'place' && styles.segmentItemActive]}
+            onPress={() => setMode('place')}>
+            <Text style={[styles.segmentTxt, mode === 'place' && styles.segmentTxtActive]}>
+              Place
+            </Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -81,16 +70,93 @@ function ArHarness() {
   );
 }
 
+const UNITS: Unit[] = ['m', 'cm', 'ft', 'in'];
+
+// Measurement demo: tap to drop points; distance/area derive from the core's anchors.
+function MeasureDemo() {
+  const m = useArMeasure();
+  const [unit, setUnit] = useState<Unit>('m');
+  const [measureMode, setMeasureMode] = useState<MeasureMode>('distance');
+
+  const onTap = (e: { nativeEvent: TapEvent }) => m.addPointAt(e.nativeEvent.x, e.nativeEvent.y);
+
+  return (
+    <View style={StyleSheet.absoluteFill}>
+      <ExpoArView
+        ref={m.ref}
+        style={StyleSheet.absoluteFill}
+        planeDetection="both"
+        depthEnabled
+        debug
+        onTap={onTap}
+        {...m.handlers}
+      />
+      <MeasureHUD
+        mode={measureMode}
+        unit={unit}
+        ready={m.ready}
+        distance={m.distance}
+        area={m.area}
+        onAdd={m.addPointAtCenter}
+        onUndo={m.undo}
+        onClear={m.clear}
+        onCycleUnit={() => setUnit((u) => UNITS[(UNITS.indexOf(u) + 1) % UNITS.length])}
+        onToggleMode={() => setMeasureMode((x) => (x === 'distance' ? 'area' : 'distance'))}
+      />
+    </View>
+  );
+}
+
+// Placement demo: tap to drop an anchor + attach a model (built-in cube) at its pose.
+function PlacementDemo() {
+  const p = useArPlacement();
+
+  const onTap = (e: { nativeEvent: TapEvent }) => void p.placeAt(e.nativeEvent.x, e.nativeEvent.y);
+
+  return (
+    <View style={StyleSheet.absoluteFill}>
+      <ExpoArView
+        ref={p.ref}
+        style={StyleSheet.absoluteFill}
+        planeDetection="both"
+        depthEnabled
+        debug
+        onTap={onTap}
+        {...p.handlers}
+      />
+      <PlacementHUD
+        ready={p.ready}
+        count={p.placedCount}
+        onPlace={() => p.placeAtCenter()}
+        onRemoveLast={p.removeLast}
+        onClear={p.clear}
+      />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
-  fallback: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, backgroundColor: '#111' },
+  fallback: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 32,
+    backgroundColor: '#111',
+  },
   fallbackText: { color: '#fff', fontSize: 16, textAlign: 'center' },
-  hud: { flex: 1, justifyContent: 'space-between' },
-  statusCard: { margin: 16, padding: 12, borderRadius: 10, backgroundColor: 'rgba(0,0,0,0.55)' },
-  statusText: { color: '#fff', fontSize: 14, fontVariant: ['tabular-nums'] },
-  errorText: { color: '#ff8a80', fontSize: 14, marginTop: 4 },
-  hint: { color: '#ffd54f', fontSize: 13, marginTop: 6 },
-  controls: { margin: 16, alignItems: 'flex-start' },
-  button: { backgroundColor: 'rgba(255,255,255,0.92)', paddingVertical: 10, paddingHorizontal: 18, borderRadius: 24 },
-  buttonText: { color: '#000', fontSize: 15, fontWeight: '600' },
+  switcherWrap: { position: 'absolute', left: 0, right: 0, bottom: 0, alignItems: 'center' },
+  segment: {
+    flexDirection: 'row',
+    marginBottom: 8,
+    padding: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(17,24,39,0.7)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  segmentItem: { paddingHorizontal: 22, paddingVertical: 8, borderRadius: 999 },
+  segmentItemActive: { backgroundColor: 'rgba(255,255,255,0.92)' },
+  segmentTxt: { color: '#E5E7EB', fontWeight: '600' },
+  segmentTxtActive: { color: '#000' },
 });

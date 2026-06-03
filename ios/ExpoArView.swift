@@ -16,6 +16,11 @@ open class ExpoArView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   public let sceneView = ARSCNView(frame: .zero)
   public private(set) var anchorsById: [String: ARAnchor] = [:]
 
+  // Feature-layer render map (used by the placement feature). The CORE never reads or
+  // writes this — removeAnchor/resetSession stay untouched, so the session/anchor logic
+  // remains use-case-agnostic. Keyed by the same anchor id the core hands out.
+  private var modelNodesById: [String: SCNNode] = [:]
+
   private var planeDetection: ARWorldTrackingConfiguration.PlaneDetection = [.horizontal, .vertical]
   private var depthEnabled = true
   private var didReportReady = false
@@ -199,6 +204,42 @@ open class ExpoArView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
 
   func snapshotBase64() -> String {
     sceneView.snapshot().jpegData(compressionQuality: 0.8)?.base64EncodedString() ?? ""
+  }
+
+  // MARK: - Additive rendering primitives (placement feature)
+  // attachModel/detachModel are NEW methods — they don't alter the session/anchor core.
+  // The placement hook calls attachModel after addAnchor, and detachModel BEFORE
+  // removeAnchor/reset, so model nodes never outlive their anchors.
+
+  /// Attach a renderable to an existing anchor, locked to its world pose. Loads a real
+  /// USDZ/SCN when `uri` resolves to a loadable scene; otherwise renders a built-in
+  /// primitive so the demo stays asset-free.
+  func attachModel(_ id: String, _ uri: String) {
+    guard let anchor = anchorsById[id] else { return }
+    detachModel(id) // idempotent — replace any existing node for this anchor
+    let node = loadModelNode(uri)
+    node.simdTransform = anchor.transform
+    sceneView.scene.rootNode.addChildNode(node)
+    modelNodesById[id] = node
+  }
+
+  /// Remove a placed node. JS calls this alongside the core's removeAnchor.
+  func detachModel(_ id: String) {
+    modelNodesById.removeValue(forKey: id)?.removeFromParentNode()
+  }
+
+  private func loadModelNode(_ uri: String) -> SCNNode {
+    // Real model load: SceneKit reads USDZ/SCN from a URL synchronously. Skip the
+    // "builtin:" sentinel and anything that doesn't parse to a real URL → primitive.
+    if !uri.hasPrefix("builtin:"), let url = URL(string: uri), url.scheme != nil,
+      let scene = try? SCNScene(url: url, options: nil) {
+      let container = SCNNode()
+      scene.rootNode.childNodes.forEach { container.addChildNode($0) }
+      return container
+    }
+    let box = SCNBox(width: 0.1, height: 0.1, length: 0.1, chamferRadius: 0.005)
+    box.firstMaterial?.diffuse.contents = UIColor.systemTeal
+    return SCNNode(geometry: box)
   }
 
   // MARK: - Anchor serialization (column-major 16-float transform — matches the contract)

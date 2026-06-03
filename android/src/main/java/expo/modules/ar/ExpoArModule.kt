@@ -57,6 +57,13 @@ class ExpoArModule : Module() {
       AsyncFunction("resume") { view: ExpoArView -> view.resumeSession() }
       AsyncFunction("reset") { view: ExpoArView -> view.resetSession() }
       AsyncFunction("snapshot") { view: ExpoArView -> view.snapshotBase64() }
+
+      // Additive rendering primitives — used by the placement feature. These attach/
+      // detach a renderable on an existing anchor; they don't touch session/anchor core.
+      AsyncFunction("attachModel") { view: ExpoArView, id: String, uri: String ->
+        view.attachModel(id, uri)
+      }
+      AsyncFunction("detachModel") { view: ExpoArView, id: String -> view.detachModel(id) }
     }
   }
 }

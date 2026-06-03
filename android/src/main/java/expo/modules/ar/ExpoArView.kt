@@ -2,6 +2,7 @@ package expo.modules.ar
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Color
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Base64
@@ -21,11 +22,15 @@ import com.google.ar.core.Point
 import com.google.ar.core.Pose
 import com.google.ar.core.Trackable
 import com.google.ar.core.TrackingState
+import dev.romainguy.kotlin.math.Float3
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
 import io.github.sceneview.ar.ARSceneView
+import io.github.sceneview.ar.node.AnchorNode
 import io.github.sceneview.gesture.GestureDetector
+import io.github.sceneview.node.CubeNode
+import io.github.sceneview.node.ModelNode
 import io.github.sceneview.node.Node
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.CountDownLatch
@@ -50,6 +55,11 @@ open class ExpoArView(context: Context, appContext: AppContext) :
 
   val sceneView = ARSceneView(context)
   protected val anchorsById = mutableMapOf<String, Anchor>()
+
+  // Feature-layer render map (used by the placement feature). The CORE never reads or
+  // writes this — removeAnchor/resetSession stay untouched, so the session/anchor logic
+  // remains use-case-agnostic. Keyed by the same anchor id the core hands out.
+  private val modelNodesById = mutableMapOf<String, AnchorNode>()
 
   private var planeMode = Config.PlaneFindingMode.HORIZONTAL_AND_VERTICAL
   private var depthEnabled = true
@@ -265,6 +275,49 @@ open class ExpoArView(context: Context, appContext: AppContext) :
     val out = ByteArrayOutputStream()
     bitmap.compress(Bitmap.CompressFormat.JPEG, 80, out)
     return Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+  }
+
+  // MARK: - Additive rendering primitives (placement feature)
+  // attachModel/detachModel are NEW methods — they don't alter the session/anchor core.
+  // The placement hook calls attachModel after addAnchor, and detachModel BEFORE
+  // removeAnchor/reset. Scene-graph mutations are posted to the UI thread (Filament/
+  // SceneView node ops must not run on the AsyncFunction worker thread).
+
+  /// Attach a renderable under an AnchorNode so it tracks the anchor automatically. Loads
+  /// a real glTF/GLB when `uri` resolves; otherwise renders a built-in cube (asset-free demo).
+  fun attachModel(id: String, uri: String) {
+    val anchor = anchorsById[id] ?: return
+    post {
+      detachModelInternal(id) // idempotent — replace any existing node for this anchor
+      val anchorNode = AnchorNode(sceneView.engine, anchor)
+      anchorNode.addChildNode(loadModelNode(uri))
+      sceneView.addChildNode(anchorNode)
+      modelNodesById[id] = anchorNode
+    }
+  }
+
+  /// Remove a placed node. JS calls this alongside the core's removeAnchor.
+  fun detachModel(id: String) {
+    post { detachModelInternal(id) }
+  }
+
+  private fun detachModelInternal(id: String) {
+    modelNodesById.remove(id)?.let { sceneView.removeChildNode(it) }
+  }
+
+  private fun loadModelNode(uri: String): Node {
+    // Real model load: createModelInstance reads a glTF/GLB from an asset path or file
+    // synchronously. Skip the "builtin:" sentinel and fall back to a primitive on failure.
+    if (!uri.startsWith("builtin:")) {
+      try {
+        val instance = sceneView.modelLoader.createModelInstance(uri)
+        return ModelNode(instance, true, 0.3f, null)
+      } catch (_: Exception) {
+        // fall through to the built-in primitive
+      }
+    }
+    val material = sceneView.materialLoader.createColorInstance(Color.parseColor("#5EEAD4"))
+    return CubeNode(sceneView.engine, Float3(0.1f, 0.1f, 0.1f), Float3(0f, 0.05f, 0f), material)
   }
 
   // MARK: - Anchor serialization — column-major 16-float transform matching the contract.

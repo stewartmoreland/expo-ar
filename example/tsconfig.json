@@ -6,5 +6,6 @@
       "expo-ar": ["../src/index"],
       "expo-ar/*": ["../src/*"]
     }
-  }
+  },
+  "exclude": ["features/__tests__"]
 }

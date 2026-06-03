@@ -83,4 +83,12 @@ export interface ArViewHandle {
   resume(): Promise<void>;
   reset(): Promise<void>;
   snapshot(): Promise<string>; // base64 JPEG
+
+  // ---- Additive rendering primitives (used by the placement feature) ----
+  // Optional because the web no-AR stub exposes none of the native functions, and any
+  // non-rendering consumer (e.g. measurement) ignores them. These extend the generic
+  // rendering surface only — they do not touch session/tracking/raycast/anchor logic,
+  // so the core stays use-case-agnostic.
+  attachModel?(anchorId: string, modelUri: string): Promise<void>;
+  detachModel?(anchorId: string): Promise<void>;
 }
