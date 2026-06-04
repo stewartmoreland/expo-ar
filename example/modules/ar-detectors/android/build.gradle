@@ -1,0 +1,29 @@
+plugins {
+  id 'com.android.library'
+  id 'org.jetbrains.kotlin.android'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.ardetectors'
+version = '1.0.0'
+
+android {
+  namespace 'expo.modules.ardetectors'
+  defaultConfig {
+    minSdkVersion 24
+  }
+  lintOptions {
+    abortOnError false
+  }
+}
+
+dependencies {
+  // The CV-fusion seam (ExpoArFrameProcessor + ExpoArDetectorRegistry) lives in the expo-ar module.
+  // Expo autolinking includes it as a sibling Gradle project named after the unscoped package name.
+  // If a build fails to resolve this, run `./gradlew projects` after prebuild and adjust the path.
+  implementation project(':expo-ar')
+
+  // ML Kit on-device object detection — bundled default model (zero asset, coarse 5-category labels).
+  // Swap for a custom LiteRT/TFLite model via ObjectDetectorOptions for production accuracy.
+  implementation 'com.google.mlkit:object-detection:17.0.2'
+}

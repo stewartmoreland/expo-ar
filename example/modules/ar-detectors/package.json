@@ -1,0 +1,7 @@
+{
+  "name": "ar-detectors",
+  "version": "1.0.0",
+  "description": "Example CV frame processors (Apple Vision / ML Kit) registered into expo-ar",
+  "main": "index.ts",
+  "private": true
+}

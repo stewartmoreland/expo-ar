@@ -135,6 +135,36 @@ export const GeoStateEvent = z.object({
 });
 export type GeoStateEvent = z.infer<typeof GeoStateEvent>;
 
+// ---- CV-fusion extension value types ----
+
+// A single on-device computer-vision detection, lifted into world space. CV runs natively on
+// the AR session's own camera frames (the camera-exclusivity rule means we can't also run
+// VisionCamera/expo-camera) and the module emits only results — never frames. The actual model
+// is provider-agnostic: a native frame-processor registered against the module supplies these.
+export const Detection = z.object({
+  id: z.string(), // stable per track if the model supports tracking; else per-frame
+  label: z.string(),
+  confidence: z.number(),
+  // View-normalized box (0–1), already orientation-corrected by the native processor
+  // (sensor→view mapping via displayTransform on iOS / transformCoordinates2d on Android),
+  // so a JS/Skia overlay can scale it straight to canvas size.
+  bbox: z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number() }),
+  // Core raycast of the box center, done in the SAME native frame so it doesn't lag the box;
+  // null when no surface sits behind the detection.
+  worldTransform: Transform.nullable(),
+});
+export type Detection = z.infer<typeof Detection>;
+
+// onDetections payload — emitted at the throttled `detectionFps` cadence, not every frame.
+export const DetectionsEvent = z.object({ detections: z.array(Detection) });
+export type DetectionsEvent = z.infer<typeof DetectionsEvent>;
+
+// Diagnostic returned by the module's getDetectorInfo(model): whether a processor is registered under
+// that name, and a human-readable label of what's actually live ("YOLOv3" vs a fallback note). Lets a
+// UI confirm a dropped model actually loaded rather than silently falling back.
+export const DetectorInfo = z.object({ available: z.boolean(), label: z.string() });
+export type DetectorInfo = z.infer<typeof DetectorInfo>;
+
 // ---- View props (JS -> native) + event handlers (native -> JS) ----
 
 type NativeEvent<T> = { nativeEvent: T };
@@ -149,11 +179,25 @@ export interface ExpoArViewProps extends ViewProps {
   // Geospatial extension: "world" (default) tracks local space; "geo" switches the session to
   // VPS-localized geospatial tracking. Changing it restarts the session (one config per session).
   trackingMode?: TrackingMode;
+  // CV-fusion extension: turn on per-frame detection. The module runs the native frame-processor
+  // selected by `detectionModel` (registered against the module, provider-agnostic) on the throttled
+  // cadence; off by default so non-CV screens pay zero per-frame cost.
+  detectionEnabled?: boolean;
+  // Name of the registered native frame-processor to run (e.g. a bundled model). No-op if unmatched.
+  detectionModel?: string;
+  // Drop detections below this score (0–1) natively, before they cross the bridge.
+  minConfidence?: number;
+  // Max detection runs per second (throttle); defaults to ~10 natively. The model is also skipped
+  // while a previous inference is still in flight.
+  detectionFps?: number;
   onReady?: (e: NativeEvent<ReadyEvent>) => void;
   onTrackingStateChange?: (e: NativeEvent<TrackingStateEvent>) => void;
   onTap?: (e: NativeEvent<TapEvent>) => void;
   onAnchorsChange?: (e: NativeEvent<AnchorsEvent>) => void;
   onProjection?: (e: NativeEvent<ProjectionEvent>) => void;
+  // CV-fusion extension: throttled batch of detections (boxes + same-frame world transforms).
+  // Only fires while `detectionEnabled` and a matching `detectionModel` processor is registered.
+  onDetections?: (e: NativeEvent<DetectionsEvent>) => void;
   // Geospatial extension: geo-tracking state transitions + throttled pose/accuracy updates.
   // Only fires while trackingMode is "geo".
   onGeoStateChange?: (e: NativeEvent<GeoStateEvent>) => void;
@@ -179,6 +223,12 @@ export interface ArViewHandle {
   // so the core stays use-case-agnostic.
   attachModel?(anchorId: string, modelUri: string): Promise<void>;
   detachModel?(anchorId: string): Promise<void>;
+
+  // CV-fusion extension: anchor directly at a world transform CV already computed (a sibling of
+  // addAnchor(x,y) that skips the raycast). Returns null if the transform can't be anchored. The
+  // new anchor flows through onAnchorsChange like any other. Optional for the same reason as the
+  // rendering primitives — the web stub exposes none.
+  addAnchorAtWorld?(transform: Transform): Promise<{ id: string } | null>;
 
   // One-shot world→screen projection (same coordinate space as ProjectedPoint). Optional
   // for the same reason as the rendering primitives — the web stub exposes none. For

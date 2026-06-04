@@ -2,6 +2,9 @@ import {
   Anchor,
   AnchorsEvent,
   Capabilities,
+  Detection,
+  DetectionsEvent,
+  DetectorInfo,
   ErrorEvent,
   GeoAnchorInput,
   GeoStateEvent,
@@ -61,7 +64,11 @@ describe('transform helpers', () => {
 describe('event payload schemas (round-trip)', () => {
   it('ReadyEvent parses a valid payload and rejects a renamed key', () => {
     const payload = {
-      capabilities: { arSupported: true, depthOrLidarAvailable: false, geoTrackingSupported: false },
+      capabilities: {
+        arSupported: true,
+        depthOrLidarAvailable: false,
+        geoTrackingSupported: false,
+      },
     };
     expect(ReadyEvent.parse(payload)).toEqual(payload);
     expect(() => ReadyEvent.parse({ capability: payload.capabilities })).toThrow();
@@ -128,6 +135,44 @@ describe('Anchor / Capabilities / RaycastResult', () => {
     expect(RaycastResult.parse({ worldTransform: null, target: null })).toEqual({
       worldTransform: null,
       target: null,
+    });
+  });
+});
+
+describe('CV-fusion extension schemas', () => {
+  const detection = {
+    id: 'd1',
+    label: 'cup',
+    confidence: 0.92,
+    bbox: { x: 0.1, y: 0.2, w: 0.3, h: 0.4 },
+    worldTransform: identityAt(1, 0, 0),
+  };
+
+  it('Detection accepts a world-anchored hit and a null (no-surface) transform', () => {
+    expect(Detection.parse(detection)).toEqual(detection);
+    expect(Detection.parse({ ...detection, worldTransform: null }).worldTransform).toBeNull();
+  });
+
+  it('Detection rejects a renamed bbox key and a non-length-16 transform', () => {
+    expect(
+      Detection.safeParse({ ...detection, bbox: { x: 0, y: 0, w: 0, height: 1 } }).success
+    ).toBe(false);
+    expect(Detection.safeParse({ ...detection, worldTransform: [0, 0, 0] }).success).toBe(false);
+  });
+
+  it('DetectionsEvent round-trips a list and an empty batch', () => {
+    expect(DetectionsEvent.parse({ detections: [detection] })).toEqual({ detections: [detection] });
+    expect(DetectionsEvent.parse({ detections: [] })).toEqual({ detections: [] });
+  });
+
+  it('DetectorInfo round-trips a loaded model and an empty/unavailable detector', () => {
+    expect(DetectorInfo.parse({ available: true, label: 'YOLOv3' })).toEqual({
+      available: true,
+      label: 'YOLOv3',
+    });
+    expect(DetectorInfo.parse({ available: false, label: '' })).toEqual({
+      available: false,
+      label: '',
     });
   });
 });

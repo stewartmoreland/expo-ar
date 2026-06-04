@@ -27,6 +27,7 @@
     "expo-module.config.json",
     "ios/ExpoArModule.swift",
     "ios/ExpoArView.swift",
+    "ios/ExpoArFrameProcessor.swift",
     "ios/ExpoAr.podspec",
     "android/build.gradle",
     "android/src/main"

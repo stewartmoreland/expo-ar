@@ -27,12 +27,23 @@ public class ExpoArModule: Module {
       ]
     }
 
+    // CV-fusion diagnostic: report whether a processor is registered under `model` and which model is
+    // actually live (e.g. "YOLOv3" vs the animal fallback). Lets the demo HUD answer "did my model
+    // load?" without digging through Xcode logs. Keys match DetectorInfo in src/ExpoAr.types.ts.
+    Function("getDetectorInfo") { (model: String) -> [String: Any] in
+      let processor = ExpoArDetectorRegistry.processor(for: model)
+      return [
+        "available": processor != nil,
+        "label": processor?.activeModelLabel ?? "",
+      ]
+    }
+
     View(ExpoArView.self) {
       // Event names are byte-for-byte identical to the Kotlin side — drift here
       // is the #1 "event never fires" bug.
       Events(
         "onReady", "onTrackingStateChange", "onTap", "onAnchorsChange", "onProjection",
-        "onGeoStateChange", "onError")
+        "onGeoStateChange", "onDetections", "onError")
 
       Prop("planeDetection") { (view: ExpoArView, mode: String) in
         view.setPlaneDetection(mode)
@@ -49,6 +60,20 @@ public class ExpoArModule: Module {
       // Geospatial extension: "world" | "geo" — switches the session configuration.
       Prop("trackingMode") { (view: ExpoArView, mode: String) in
         view.setTrackingMode(mode)
+      }
+      // CV-fusion extension: per-frame detection (provider-agnostic — runs the registered
+      // detectionModel processor). None of these restart the session.
+      Prop("detectionEnabled") { (view: ExpoArView, on: Bool) in
+        view.setDetectionEnabled(on)
+      }
+      Prop("detectionModel") { (view: ExpoArView, name: String) in
+        view.setDetectionModel(name)
+      }
+      Prop("minConfidence") { (view: ExpoArView, value: Double) in
+        view.setMinConfidence(value)
+      }
+      Prop("detectionFps") { (view: ExpoArView, value: Double) in
+        view.setDetectionFps(value)
       }
 
       // Generic primitives — features compose these via the imperative ref.
@@ -92,6 +117,12 @@ public class ExpoArModule: Module {
       }
       AsyncFunction("detachModel") { (view: ExpoArView, id: String) in
         view.detachModel(id)
+      }
+
+      // CV-fusion extension: anchor at a world transform the detector already computed (skips the
+      // raycast addAnchor(x,y) does). The new anchor flows through onAnchorsChange.
+      AsyncFunction("addAnchorAtWorld") { (view: ExpoArView, transform: [Double]) -> [String: Any]? in
+        view.addAnchorAtWorld(transform)
       }
     }
   }
