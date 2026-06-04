@@ -142,3 +142,7 @@ Any Swift/Kotlin change requires a native rebuild (Fast Refresh only reloads JS)
 - [ ] Swift and Kotlin emit identical event names + payload keys (`types.ts`).
 - [ ] `getCapabilities()` branches to the fallback before mounting the AR view.
 - [ ] Session pause/resume wired to screen focus/blur.
+
+## Geospatial add-on
+
+If enabling geospatial/VPS anchoring, the plugin and build need extra entries (iOS location usage string + optional ARCore pod; Android `ACCESS_FINE_LOCATION`, `play-services-location`, ARCore API key meta-data; plus Google Cloud ARCore API provisioning and auth). Those deltas live with the feature in `references/examples/geospatial.md` so this file stays the baseline build config.

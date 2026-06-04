@@ -11,7 +11,7 @@ type ExpoArModuleEvents = Record<never, never>;
 // before ever mounting the view. No native AR runs on web.
 class ExpoArModule extends NativeModule<ExpoArModuleEvents> {
   getCapabilities(): Capabilities {
-    return { arSupported: false, depthOrLidarAvailable: false };
+    return { arSupported: false, depthOrLidarAvailable: false, geoTrackingSupported: false };
   }
 }
 

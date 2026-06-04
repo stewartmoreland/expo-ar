@@ -16,12 +16,15 @@ import androidx.lifecycle.findViewTreeLifecycleOwner
 import com.google.ar.core.Anchor
 import com.google.ar.core.Config
 import com.google.ar.core.DepthPoint
+import com.google.ar.core.Earth
 import com.google.ar.core.Frame
+import com.google.ar.core.GeospatialPose
 import com.google.ar.core.Plane
 import com.google.ar.core.Point
 import com.google.ar.core.Pose
 import com.google.ar.core.Trackable
 import com.google.ar.core.TrackingState
+import com.google.ar.core.VpsAvailability
 import dev.romainguy.kotlin.math.Float3
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.viewevent.EventDispatcher
@@ -53,10 +56,14 @@ open class ExpoArView(context: Context, appContext: AppContext) :
   private val onTap by EventDispatcher()
   private val onAnchorsChange by EventDispatcher()
   private val onProjection by EventDispatcher()
+  private val onGeoStateChange by EventDispatcher()
   private val onError by EventDispatcher()
 
   val sceneView = ARSceneView(context)
   protected val anchorsById = mutableMapOf<String, Anchor>()
+  // Geospatial extension: ids of anchors created via addGeoAnchor, so serialize() can tag them
+  // type "geo". (anchorsById holds plain Anchors regardless of how they were created.)
+  private val geoAnchorIds = mutableSetOf<String>()
 
   // Feature-layer render map (used by the placement feature). The CORE never reads or
   // writes this — removeAnchor/resetSession stay untouched, so the session/anchor logic
@@ -73,6 +80,9 @@ open class ExpoArView(context: Context, appContext: AppContext) :
   // non-measurement screens pay nothing. lastProjectionEmit is in Frame.timestamp nanos.
   private var emitProjections = false
   private var lastProjectionEmit = 0L
+  // Geospatial extension: "world" (default) | "geo". lastGeoEmit throttles onGeoStateChange.
+  private var trackingMode = "world"
+  private var lastGeoEmit = 0L
 
   // ---- Lifecycle plumbing (see class doc) ----
   private val lifecycleRegistry = LifecycleRegistry(this)
@@ -153,6 +163,16 @@ open class ExpoArView(context: Context, appContext: AppContext) :
         else Config.DepthMode.DISABLED
       config.planeFindingMode = planeMode
       config.lightEstimationMode = Config.LightEstimationMode.ENVIRONMENTAL_HDR
+      // Geospatial extension: enable Earth/VPS tracking only in geo mode, gated on support so
+      // it degrades cleanly. Requires ACCESS_FINE_LOCATION granted + a Cloud ARCore API key.
+      config.geospatialMode =
+        if (trackingMode == "geo" &&
+          session.isGeospatialModeSupported(Config.GeospatialMode.ENABLED)
+        ) {
+          Config.GeospatialMode.ENABLED
+        } else {
+          Config.GeospatialMode.DISABLED
+        }
     }
   }
 
@@ -180,6 +200,15 @@ open class ExpoArView(context: Context, appContext: AppContext) :
     emitProjections = on
   }
 
+  // Geospatial extension: switch the session configuration (reconfigured in place). No-op if
+  // the mode is unchanged.
+  fun setTrackingMode(mode: String) {
+    val normalized = if (mode == "geo") "geo" else "world"
+    if (normalized == trackingMode) return
+    trackingMode = normalized
+    configure()
+  }
+
   // MARK: - Session lifecycle (JS-driven, on screen blur/focus)
   fun pauseSession() {
     pausedByUser = true
@@ -194,6 +223,7 @@ open class ExpoArView(context: Context, appContext: AppContext) :
   fun resetSession() {
     anchorsById.values.forEach { it.detach() }
     anchorsById.clear()
+    geoAnchorIds.clear()
     emitAnchors()
     configure()
   }
@@ -212,12 +242,16 @@ open class ExpoArView(context: Context, appContext: AppContext) :
             "capabilities" to mapOf(
               "arSupported" to true,
               "depthOrLidarAvailable" to depthAvailable,
+              "geoTrackingSupported" to
+                (sceneView.session?.isGeospatialModeSupported(Config.GeospatialMode.ENABLED)
+                  ?: false),
             )
           )
         )
       }
     }
     emitProjectionsIfNeeded(frame)
+    emitGeoIfNeeded(frame)
   }
 
   // MARK: - Per-frame projection (opt-in via emitProjections)
@@ -286,6 +320,109 @@ open class ExpoArView(context: Context, appContext: AppContext) :
     )
   }
 
+  // MARK: - Geospatial extension (active only while trackingMode is "geo")
+
+  // Per-frame: emit a throttled onGeoStateChange with the Earth state + camera geospatial pose.
+  // No-op outside geo mode.
+  private fun emitGeoIfNeeded(frame: Frame) {
+    if (trackingMode != "geo") return
+    val now = frame.timestamp
+    if (now - lastGeoEmit < GEO_THROTTLE_NS) return
+    lastGeoEmit = now
+    val earth = sceneView.session?.earth
+    val pose =
+      if (earth != null &&
+        earth.earthState == Earth.EarthState.ENABLED &&
+        earth.trackingState == TrackingState.TRACKING
+      ) {
+        geoPoseMap(earth.cameraGeospatialPose)
+      } else {
+        null
+      }
+    onGeoStateChange(mapOf("state" to geoStateOf(earth), "pose" to pose))
+  }
+
+  // Earth state → contract GeoTrackingState. No earth yet → still spinning up ("initializing").
+  private fun geoStateOf(earth: Earth?): String {
+    if (earth == null) return "initializing"
+    return when (earth.earthState) {
+      Earth.EarthState.ENABLED ->
+        if (earth.trackingState == TrackingState.TRACKING) "localized" else "localizing"
+      else -> "unavailable"
+    }
+  }
+
+  /// VPS coverage check at a coordinate — resolve "available"|"unavailable"|"unknown".
+  fun checkVpsAvailability(latitude: Double, longitude: Double, resolve: (String) -> Unit) {
+    val session = sceneView.session
+    if (session == null) {
+      resolve("unknown")
+      return
+    }
+    session.checkVpsAvailabilityAsync(latitude, longitude) { availability ->
+      resolve(
+        when (availability) {
+          VpsAvailability.AVAILABLE -> "available"
+          VpsAvailability.UNAVAILABLE -> "unavailable"
+          else -> "unknown"
+        }
+      )
+    }
+  }
+
+  /// Create a geo anchor at a real coordinate; emits onAnchorsChange (type "geo"). `altitude`
+  /// null → the device's current altitude (synchronous; ARCore terrain resolution is async and
+  /// not wired here). Requires the Earth to be TRACKING.
+  fun addGeoAnchor(
+    latitude: Double,
+    longitude: Double,
+    altitude: Double?,
+    heading: Double,
+  ): Map<String, Any?>? {
+    if (trackingMode != "geo") return err("not_geo")
+    val earth = sceneView.session?.earth ?: return err("no_earth")
+    if (earth.earthState != Earth.EarthState.ENABLED ||
+      earth.trackingState != TrackingState.TRACKING
+    ) {
+      return err("not_localized")
+    }
+    val quaternion = headingToQuaternion(heading)
+    val alt = altitude ?: earth.cameraGeospatialPose.altitude
+    val anchor = earth.createAnchor(latitude, longitude, alt, quaternion)
+    val id = (++anchorCounter).toString()
+    anchorsById[id] = anchor
+    geoAnchorIds.add(id)
+    emitAnchors()
+    return mapOf("id" to id)
+  }
+
+  /// Current device geospatial pose, or null when not localized.
+  fun getGeospatialPose(): Map<String, Any?>? {
+    val earth = sceneView.session?.earth ?: return null
+    if (earth.earthState != Earth.EarthState.ENABLED ||
+      earth.trackingState != TrackingState.TRACKING
+    ) {
+      return null
+    }
+    return geoPoseMap(earth.cameraGeospatialPose)
+  }
+
+  private fun geoPoseMap(p: GeospatialPose): Map<String, Any?> =
+    mapOf(
+      "latitude" to p.latitude,
+      "longitude" to p.longitude,
+      "altitude" to p.altitude,
+      "horizontalAccuracy" to p.horizontalAccuracy,
+      "verticalAccuracy" to p.verticalAccuracy,
+      "headingAccuracy" to p.orientationYawAccuracy,
+    )
+
+  // Heading (degrees) → East-Up-South quaternion: a yaw rotation about the Up (+Y) axis.
+  private fun headingToQuaternion(headingDegrees: Double): FloatArray {
+    val half = Math.toRadians(headingDegrees) / 2.0
+    return floatArrayOf(0f, Math.sin(half).toFloat(), 0f, Math.cos(half).toFloat())
+  }
+
   // Matches the Swift mapping so onTrackingStateChange payloads are identical.
   private fun TrackingState.toContract() = when (this) {
     TrackingState.TRACKING -> "normal"
@@ -329,6 +466,7 @@ open class ExpoArView(context: Context, appContext: AppContext) :
 
   fun removeAnchor(id: String) {
     anchorsById.remove(id)?.let {
+      geoAnchorIds.remove(id)
       it.detach()
       emitAnchors()
     }
@@ -415,7 +553,11 @@ open class ExpoArView(context: Context, appContext: AppContext) :
     onAnchorsChange(mapOf("anchors" to anchorsById.map { serialize(it.key, it.value) }))
 
   private fun serialize(id: String, anchor: Anchor) =
-    mapOf("id" to id, "transform" to flatten(anchor.pose), "type" to "point")
+    mapOf(
+      "id" to id,
+      "transform" to flatten(anchor.pose),
+      "type" to if (geoAnchorIds.contains(id)) "geo" else "point",
+    )
 
   // Pose.toMatrix is column-major — same layout as the iOS simd_float4x4 flatten, so a
   // JS transform array means the same thing on both platforms.
@@ -437,6 +579,7 @@ open class ExpoArView(context: Context, appContext: AppContext) :
 
   private companion object {
     const val PROJECTION_THROTTLE_NS = 33_000_000L // ~30fps
+    const val GEO_THROTTLE_NS = 400_000_000L // ~2.5fps — geo pose/accuracy stream
     const val NEAR_M = 0.01f
     const val FAR_M = 100f
   }

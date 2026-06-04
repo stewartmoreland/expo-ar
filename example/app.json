@@ -20,7 +20,8 @@
       "predictiveBackGestureEnabled": false,
       "package": "expo.module.ar.example",
       "permissions": [
-        "android.permission.CAMERA"
+        "android.permission.CAMERA",
+        "android.permission.ACCESS_FINE_LOCATION"
       ]
     },
     "web": {
@@ -31,9 +32,17 @@
         "../app.plugin.js",
         {
           "cameraPermission": "Allow $(PRODUCT_NAME) to use the camera for AR.",
-          "arRequired": false
+          "arRequired": false,
+          "geospatial": true,
+          "locationPermission": "Allow $(PRODUCT_NAME) to use your location to place AR content at real-world places.",
+          "arcoreApiKey": "REPLACE_WITH_YOUR_ARCORE_API_KEY"
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "f452a75d-c6c1-4726-8bf9-7506770b4b67"
+      }
+    }
   }
 }
