@@ -13,17 +13,6 @@ Building AR in a React Native app usually means writing two separate native inte
 
 It is intentionally **use-case agnostic**. The module exposes the generic AR primitives — session lifecycle, tracking, raycasting, anchors, plane detection, and depth/LiDAR — and leaves specific features (measurement, tap-to-place objects, room scanning, CV fusion) to be composed on top.
 
-## Important: this is not built on `expo-camera`
-
-An ARKit `ARSession` or ARCore `Session` takes **exclusive** control of the camera and renders its own camera feed. You **cannot** stack ARKit/ARCore content over an `expo-camera` `<CameraView>` — that yields a black frame.
-
-So the relationship is **sibling capabilities, not stacked layers**:
-
-- **The `expo-ar` view owns the camera whenever AR is active** and renders the camera feed + world-anchored 3D content natively. React Native draws 2D UI (buttons, HUD, labels) on top as normal RN elements.
-- **`expo-camera` is for the non-AR paths** — devices without ARKit/ARCore, or anywhere the app just needs photos/video.
-
-The two can coexist in one app, but never run on the same screen at the same time.
-
 ## Requirements
 
 - **Expo SDK 50+** with the Expo Modules API.
