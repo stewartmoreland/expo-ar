@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0 (2026-06-04)
+
+### Features
+
+* add CV-fusion object detection (native frame processors + detection HUD) ([ef2d6ae](https://github.com/stewartmoreland/expo-ar/commit/ef2d6ae1a747c79696b5be09b607c4cb0c6cf9ae))
+* add geospatial/VPS anchoring (ARGeoTracking + ARCore Geospatial) ([056bff5](https://github.com/stewartmoreland/expo-ar/commit/056bff5cffc01ec6cfde7d6e264d2f2cc816630b))
+* enhance AR documentation and add CV fusion example ([ebaa666](https://github.com/stewartmoreland/expo-ar/commit/ebaa6667103c92efe23d273569cb7528e5d049a9))
+
 All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
