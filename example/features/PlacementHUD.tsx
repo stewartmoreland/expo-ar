@@ -1,49 +1,75 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { memo } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const NEON = '#5EEAD4';
+import { ActionButton, Caption, Glass, Reticle } from './controls';
+import { LAYOUT, colors, radii, readoutText, subReadoutText } from './theme';
 
-// 2D HUD over the native AR view. The placed cubes are world-anchored and rendered
-// natively (so they stay locked in space); this only shows the count + controls.
-export function PlacementHUD(props: {
+// 2D HUD over the native AR view. Placed cubes are world-anchored and rendered natively;
+// this shows the count + controls. Shares the same chrome as MeasureHUD (top card,
+// centered reticle, bottom bar) so the two demos feel like one app.
+export const PlacementHUD = memo(function PlacementHUD(props: {
   ready: boolean;
   count: number;
   onPlace: () => void;
   onRemoveLast: () => void;
   onClear: () => void;
 }) {
+  const insets = useSafeAreaInsets();
+  const prompt = !props.ready
+    ? 'Move device to find a surface'
+    : 'Tap a surface to place an object';
+
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-      <View style={s.reticleWrap} pointerEvents="none">
-        <View style={[s.reticle, !props.ready && s.gated]} />
-      </View>
-
-      <View style={s.top} pointerEvents="none">
-        <View style={s.pill}>
-          <Text style={s.pillTxt} selectable>
-            {props.ready ? `${props.count} placed` : 'Move device to start…'}
+      <View
+        pointerEvents="box-none"
+        style={[styles.top, { top: insets.top + LAYOUT.topSlot + LAYOUT.gap }]}>
+        <Caption>{prompt}</Caption>
+        <Glass style={styles.card} intensity={60}>
+          <Text style={readoutText} selectable>
+            {props.ready ? `${props.count}` : '—'}
           </Text>
-        </View>
+          <Text style={subReadoutText} selectable>
+            {props.count === 1 ? 'object placed' : 'objects placed'}
+          </Text>
+        </Glass>
       </View>
 
-      <View style={s.row}>
-        <Pressable onPress={props.onRemoveLast} style={s.ghost}>
-          <Text style={s.ghostTxt}>Remove last</Text>
-        </Pressable>
-        <Pressable
+      <View style={styles.reticleWrap} pointerEvents="none">
+        <Reticle ready={props.ready} />
+      </View>
+
+      <View style={[styles.bottom, { bottom: insets.bottom + LAYOUT.gap }]}>
+        <ActionButton label="Remove last" onPress={props.onRemoveLast} feedback="select" />
+        <ActionButton
+          label="Place"
+          variant="primary"
           onPress={props.onPlace}
           disabled={!props.ready}
-          style={[s.primary, !props.ready && s.disabled]}>
-          <Text style={s.primaryTxt}>Place</Text>
-        </Pressable>
-        <Pressable onPress={props.onClear} style={s.ghost}>
-          <Text style={s.ghostTxt}>Clear</Text>
-        </Pressable>
+          feedback="medium"
+        />
+        <ActionButton label="Clear" onPress={props.onClear} feedback="warn" />
       </View>
     </View>
   );
-}
+});
 
-const s = StyleSheet.create({
+const styles = StyleSheet.create({
+  top: {
+    position: 'absolute',
+    left: LAYOUT.edge,
+    right: LAYOUT.edge,
+    gap: 10,
+    alignItems: 'flex-start',
+  },
+  card: {
+    borderRadius: radii.panel,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    borderColor: colors.accentHairline,
+    alignItems: 'flex-start',
+  },
   reticleWrap: {
     position: 'absolute',
     top: 0,
@@ -53,44 +79,12 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  reticle: {
-    width: 22,
-    height: 22,
-    borderRadius: 4,
-    borderWidth: 2,
-    borderColor: NEON,
-    boxShadow: `0 0 8px ${NEON}`,
-  },
-  gated: { borderColor: '#9CA3AF', boxShadow: 'none' },
-  top: { position: 'absolute', top: 72, left: 0, right: 0, alignItems: 'center' },
-  pill: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 999,
-    backgroundColor: 'rgba(17,24,39,0.55)',
-    borderWidth: 1,
-    borderColor: 'rgba(94,234,212,0.4)',
-  },
-  pillTxt: { color: '#F9FAFB', fontSize: 18, fontWeight: '600', fontVariant: ['tabular-nums'] },
-  row: {
+  bottom: {
     position: 'absolute',
-    bottom: 48,
-    left: 20,
-    right: 20,
+    left: LAYOUT.edge,
+    right: LAYOUT.edge,
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    justifyContent: 'space-between',
   },
-  primary: { paddingHorizontal: 28, paddingVertical: 14, borderRadius: 999, backgroundColor: NEON },
-  primaryTxt: { color: '#06281f', fontWeight: '700' },
-  disabled: { opacity: 0.4 },
-  ghost: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
-  },
-  ghostTxt: { color: '#E5E7EB', fontWeight: '600' },
 });

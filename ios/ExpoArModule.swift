@@ -19,7 +19,8 @@ public class ExpoArModule: Module {
     View(ExpoArView.self) {
       // Event names are byte-for-byte identical to the Kotlin side — drift here
       // is the #1 "event never fires" bug.
-      Events("onReady", "onTrackingStateChange", "onTap", "onAnchorsChange", "onError")
+      Events(
+        "onReady", "onTrackingStateChange", "onTap", "onAnchorsChange", "onProjection", "onError")
 
       Prop("planeDetection") { (view: ExpoArView, mode: String) in
         view.setPlaneDetection(mode)
@@ -29,6 +30,9 @@ public class ExpoArModule: Module {
       }
       Prop("debug") { (view: ExpoArView, on: Bool) in
         view.setDebug(on)
+      }
+      Prop("emitProjections") { (view: ExpoArView, on: Bool) in
+        view.setEmitProjections(on)
       }
 
       // Generic primitives — features compose these via the imperative ref.
@@ -48,6 +52,9 @@ public class ExpoArModule: Module {
       AsyncFunction("resume") { (view: ExpoArView) in view.resumeSession() }
       AsyncFunction("reset") { (view: ExpoArView) in view.resetSession() }
       AsyncFunction("snapshot") { (view: ExpoArView) -> String in view.snapshotBase64() }
+      AsyncFunction("worldToScreen") { (view: ExpoArView, transform: [Double]) -> [String: Any]? in
+        view.worldToScreen(transform)
+      }
 
       // Additive rendering primitives — used by the placement feature. These attach/
       // detach a renderable on an existing anchor; they don't touch session/anchor core.

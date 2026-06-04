@@ -35,6 +35,7 @@ import io.github.sceneview.node.Node
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import kotlin.math.abs
 
 // Generic ARCore AR view. Owns the camera + world-anchored 3D content; React Native
 // draws its 2D HUD on top. `open` + exposed sceneView/anchorsById so feature code
@@ -51,6 +52,7 @@ open class ExpoArView(context: Context, appContext: AppContext) :
   private val onTrackingStateChange by EventDispatcher()
   private val onTap by EventDispatcher()
   private val onAnchorsChange by EventDispatcher()
+  private val onProjection by EventDispatcher()
   private val onError by EventDispatcher()
 
   val sceneView = ARSceneView(context)
@@ -67,6 +69,10 @@ open class ExpoArView(context: Context, appContext: AppContext) :
   private var didReportReady = false
   private var lastState: TrackingState? = null
   private var anchorCounter = 0
+  // Opt-in per-frame projection of anchors → screen, gated to ~30fps. Off by default so
+  // non-measurement screens pay nothing. lastProjectionEmit is in Frame.timestamp nanos.
+  private var emitProjections = false
+  private var lastProjectionEmit = 0L
 
   // ---- Lifecycle plumbing (see class doc) ----
   private val lifecycleRegistry = LifecycleRegistry(this)
@@ -93,7 +99,10 @@ open class ExpoArView(context: Context, appContext: AppContext) :
     // is no setOnGestureListener(onSingleTapConfirmed = …) helper (that was older API).
     sceneView.onGestureListener = object : GestureDetector.SimpleOnGestureListener() {
       override fun onSingleTapConfirmed(e: MotionEvent, node: Node?) {
-        onTap(mapOf("x" to e.x, "y" to e.y))
+        // MotionEvent is in physical pixels; emit RN logical dp so onTap/raycast/projection
+        // all speak the SAME coordinate space as iOS points (and useWindowDimensions dp).
+        val density = resources.displayMetrics.density
+        onTap(mapOf("x" to e.x / density, "y" to e.y / density))
       }
     }
   }
@@ -161,6 +170,10 @@ open class ExpoArView(context: Context, appContext: AppContext) :
     sceneView.planeRenderer.isEnabled = on
   }
 
+  fun setEmitProjections(on: Boolean) {
+    emitProjections = on
+  }
+
   // MARK: - Session lifecycle (JS-driven, on screen blur/focus)
   fun pauseSession() {
     pausedByUser = true
@@ -198,6 +211,73 @@ open class ExpoArView(context: Context, appContext: AppContext) :
         )
       }
     }
+    emitProjectionsIfNeeded(frame)
+  }
+
+  // MARK: - Per-frame projection (opt-in via emitProjections)
+  // Projects each anchor's world position to screen dp so a 2D HUD can pin labels that
+  // track in 3D. Throttled to ~30fps; skipped while not tracking or with <2 anchors.
+  private fun emitProjectionsIfNeeded(frame: Frame) {
+    if (!emitProjections || anchorsById.size < 2) return
+    if (frame.camera.trackingState != TrackingState.TRACKING) return
+    val now = frame.timestamp
+    if (now - lastProjectionEmit < PROJECTION_THROTTLE_NS) return
+    lastProjectionEmit = now
+
+    val view = FloatArray(16).also { frame.camera.getViewMatrix(it, 0) }
+    val proj = FloatArray(16).also { frame.camera.getProjectionMatrix(it, 0, NEAR_M, FAR_M) }
+    val density = resources.displayMetrics.density
+    // anchorsById is a LinkedHashMap → placement order preserved (matches iOS anchorOrder).
+    val points = anchorsById.map { (id, anchor) ->
+      val pose = anchor.pose
+      project(id, pose.tx(), pose.ty(), pose.tz(), view, proj, density)
+    }
+    onProjection(mapOf("points" to points))
+  }
+
+  // clip = projection · view · worldPoint (column-major), then NDC → px (with the y-flip:
+  // NDC is y-up, screen is y-down) → dp. inFront = clip.w > 0 (point ahead of the camera).
+  private fun project(
+    id: String, x: Float, y: Float, z: Float,
+    view: FloatArray, proj: FloatArray, density: Float,
+  ): Map<String, Any?> {
+    val eye = mul(view, x, y, z, 1f)
+    val clip = mul(proj, eye[0], eye[1], eye[2], eye[3])
+    val w = clip[3]
+    if (abs(w) < 1e-6f) return mapOf("id" to id, "x" to 0.0, "y" to 0.0, "inFront" to false)
+    val ndcX = clip[0] / w
+    val ndcY = clip[1] / w
+    val px = (ndcX * 0.5f + 0.5f) * sceneView.width
+    val py = (1f - (ndcY * 0.5f + 0.5f)) * sceneView.height
+    return mapOf(
+      "id" to id,
+      "x" to (px / density).toDouble(),
+      "y" to (py / density).toDouble(),
+      "inFront" to (w > 0f),
+    )
+  }
+
+  // Column-major 4x4 (FloatArray[16], m[col*4 + row]) times a vec4.
+  private fun mul(m: FloatArray, x: Float, y: Float, z: Float, w: Float): FloatArray =
+    floatArrayOf(
+      m[0] * x + m[4] * y + m[8] * z + m[12] * w,
+      m[1] * x + m[5] * y + m[9] * z + m[13] * w,
+      m[2] * x + m[6] * y + m[10] * z + m[14] * w,
+      m[3] * x + m[7] * y + m[11] * z + m[15] * w,
+    )
+
+  /// One-shot world→screen projection of a transform's translation. Returns null when
+  /// there's no tracking frame. id is empty (no owning anchor for an ad-hoc point).
+  fun worldToScreen(transform: List<Double>): Map<String, Any?>? {
+    if (transform.size < 16) return null
+    val frame = sceneView.frame ?: return null
+    if (frame.camera.trackingState != TrackingState.TRACKING) return null
+    val view = FloatArray(16).also { frame.camera.getViewMatrix(it, 0) }
+    val proj = FloatArray(16).also { frame.camera.getProjectionMatrix(it, 0, NEAR_M, FAR_M) }
+    return project(
+      "", transform[12].toFloat(), transform[13].toFloat(), transform[14].toFloat(),
+      view, proj, resources.displayMetrics.density,
+    )
   }
 
   // Matches the Swift mapping so onTrackingStateChange payloads are identical.
@@ -213,7 +293,9 @@ open class ExpoArView(context: Context, appContext: AppContext) :
   fun raycast(x: Float, y: Float): Map<String, Any?> {
     val frame = sceneView.frame ?: return nullHit()
     if (frame.camera.trackingState != TrackingState.TRACKING) return nullHit()
-    val hit = frame.hitTest(x, y).firstOrNull {
+    // x/y arrive in RN dp (see onSingleTapConfirmed); hitTest wants physical pixels.
+    val density = resources.displayMetrics.density
+    val hit = frame.hitTest(x * density, y * density).firstOrNull {
       val t = it.trackable
       t is Plane || t is Point || t is DepthPoint
     } ?: return nullHit()
@@ -226,7 +308,9 @@ open class ExpoArView(context: Context, appContext: AppContext) :
   fun addAnchor(x: Float, y: Float): Map<String, Any?>? {
     val frame = sceneView.frame ?: return err("no_frame")
     if (frame.camera.trackingState != TrackingState.TRACKING) return err("no_frame")
-    val hit = frame.hitTest(x, y).firstOrNull {
+    // x/y arrive in RN dp (see onSingleTapConfirmed); hitTest wants physical pixels.
+    val density = resources.displayMetrics.density
+    val hit = frame.hitTest(x * density, y * density).firstOrNull {
       val t = it.trackable
       t is Plane || t is Point || t is DepthPoint
     } ?: return err("no_hit")
@@ -343,5 +427,11 @@ open class ExpoArView(context: Context, appContext: AppContext) :
   private fun err(code: String): Map<String, Any?>? {
     onError(mapOf("code" to code, "message" to "No surface found."))
     return null
+  }
+
+  private companion object {
+    const val PROJECTION_THROTTLE_NS = 33_000_000L // ~30fps
+    const val NEAR_M = 0.01f
+    const val FAR_M = 100f
   }
 }

@@ -1,17 +1,23 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { memo } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ActionButton, Caption, Chip, Glass, Reticle } from './controls';
 import { formatArea, formatLength, type MeasureMode, type Unit } from './measurement';
+import { LAYOUT, colors, radii, readoutText, subReadoutText } from './theme';
 
-const NEON = '#5EEAD4';
-
-// 2D screen-space HUD drawn over the native AR view. Event-driven (updates on tap), so
-// plain RN state is fine — no per-frame Skia needed. World-anchored lines are drawn
-// natively; this only shows the readout + controls.
-export function MeasureHUD(props: {
+// 2D screen-space HUD over the native AR view. World-anchored lines + per-segment labels
+// track natively/over the object; this is the guided "measuring tape" chrome: a top
+// readout card with the step prompt, a centered reticle showing the next point number, and
+// a bottom action bar. Memoized so the per-frame label updates (in MeasureDemo) don't
+// re-render it — its props only change on tap or toggle.
+export const MeasureHUD = memo(function MeasureHUD(props: {
   mode: MeasureMode;
   unit: Unit;
   ready: boolean;
+  count: number;
   distance: number | null;
+  perimeter: number | null;
   area: number | null;
   onAdd: () => void;
   onUndo: () => void;
@@ -19,54 +25,74 @@ export function MeasureHUD(props: {
   onCycleUnit: () => void;
   onToggleMode: () => void;
 }) {
-  const primary =
-    props.mode === 'area'
-      ? formatArea(props.area, props.unit)
-      : formatLength(props.distance, props.unit);
+  const insets = useSafeAreaInsets();
+  const isArea = props.mode === 'area';
+
+  const primary = isArea
+    ? formatArea(props.area, props.unit)
+    : formatLength(props.distance, props.unit);
+  const secondary = isArea
+    ? `perimeter ${formatLength(props.perimeter, props.unit)}`
+    : `total ${formatLength(props.perimeter, props.unit)}`;
+
+  const prompt = !props.ready
+    ? 'Move device to find a surface'
+    : props.count === 0
+      ? 'Tap a surface to place point 1'
+      : `Tap to place point ${props.count + 1}`;
 
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-      {/* Center reticle — neon when tracking is ready, grey while gated. */}
-      <View style={s.reticleWrap} pointerEvents="none">
-        <View style={[s.reticle, !props.ready && s.gated]} />
+      {/* Top readout card — below the mode switch slot. */}
+      <View
+        pointerEvents="box-none"
+        style={[styles.top, { top: insets.top + LAYOUT.topSlot + LAYOUT.gap }]}>
+        <Caption>{prompt}</Caption>
+        <Glass style={styles.card} intensity={60}>
+          <View style={styles.cardRow}>
+            <View style={styles.readoutCol}>
+              <Text style={readoutText} selectable>
+                {props.ready ? primary : '—'}
+              </Text>
+              <Text style={subReadoutText} selectable>
+                {props.ready ? `${secondary}  ·  ${props.count} pts` : 'Waiting for tracking…'}
+              </Text>
+            </View>
+            <View style={styles.chips}>
+              <Chip label={props.mode} onPress={props.onToggleMode} />
+              <Chip label={props.unit} onPress={props.onCycleUnit} />
+            </View>
+          </View>
+        </Glass>
       </View>
 
-      {/* Readout pill + unit/mode chips. */}
-      <View style={s.top} pointerEvents="box-none">
-        <View style={s.pill} pointerEvents="none">
-          <Text style={s.pillTxt} selectable>
-            {props.ready ? primary : 'Move device to start…'}
-          </Text>
-        </View>
-        <View style={s.chips}>
-          <Pressable style={s.chip} onPress={props.onToggleMode}>
-            <Text style={s.chipTxt}>{props.mode}</Text>
-          </Pressable>
-          <Pressable style={s.chip} onPress={props.onCycleUnit}>
-            <Text style={s.chipTxt}>{props.unit}</Text>
-          </Pressable>
-        </View>
+      {/* Centered reticle — always dead-center, shows the next point number. */}
+      <View style={styles.reticleWrap} pointerEvents="none">
+        <Reticle ready={props.ready} nextIndex={props.ready ? props.count + 1 : undefined} />
       </View>
 
-      <View style={s.row}>
-        <Pressable onPress={props.onUndo} style={s.ghost}>
-          <Text style={s.ghostTxt}>Undo</Text>
-        </Pressable>
-        <Pressable
+      {/* Bottom action bar — above the home indicator. */}
+      <View style={[styles.bottom, { bottom: insets.bottom + LAYOUT.gap }]}>
+        <ActionButton label="Undo" onPress={props.onUndo} feedback="select" />
+        <ActionButton
+          label="Add point"
+          variant="primary"
           onPress={props.onAdd}
           disabled={!props.ready}
-          style={[s.primary, !props.ready && s.disabled]}>
-          <Text style={s.primaryTxt}>Add point</Text>
-        </Pressable>
-        <Pressable onPress={props.onClear} style={s.ghost}>
-          <Text style={s.ghostTxt}>Clear</Text>
-        </Pressable>
+          feedback="medium"
+        />
+        <ActionButton label="Clear" onPress={props.onClear} feedback="warn" />
       </View>
     </View>
   );
-}
+});
 
-const s = StyleSheet.create({
+const styles = StyleSheet.create({
+  top: { position: 'absolute', left: LAYOUT.edge, right: LAYOUT.edge, gap: 10 },
+  card: { borderRadius: radii.panel, padding: 16, borderColor: colors.accentHairline },
+  cardRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  readoutCol: { flexShrink: 1, gap: 4 },
+  chips: { gap: 8 },
   reticleWrap: {
     position: 'absolute',
     top: 0,
@@ -76,54 +102,12 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  reticle: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 2,
-    borderColor: NEON,
-    boxShadow: `0 0 8px ${NEON}`,
-  },
-  gated: { borderColor: '#9CA3AF', boxShadow: 'none' },
-  top: { position: 'absolute', top: 72, left: 0, right: 0, alignItems: 'center', gap: 10 },
-  pill: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 999,
-    backgroundColor: 'rgba(17,24,39,0.55)',
-    borderWidth: 1,
-    borderColor: 'rgba(94,234,212,0.4)',
-  },
-  pillTxt: { color: '#F9FAFB', fontSize: 18, fontWeight: '600', fontVariant: ['tabular-nums'] },
-  chips: { flexDirection: 'row', gap: 8 },
-  chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
-  },
-  chipTxt: { color: '#E5E7EB', fontWeight: '600', textTransform: 'uppercase', fontSize: 12 },
-  row: {
+  bottom: {
     position: 'absolute',
-    bottom: 48,
-    left: 20,
-    right: 20,
+    left: LAYOUT.edge,
+    right: LAYOUT.edge,
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    justifyContent: 'space-between',
   },
-  primary: { paddingHorizontal: 28, paddingVertical: 14, borderRadius: 999, backgroundColor: NEON },
-  primaryTxt: { color: '#06281f', fontWeight: '700' },
-  disabled: { opacity: 0.4 },
-  ghost: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
-  },
-  ghostTxt: { color: '#E5E7EB', fontWeight: '600' },
 });

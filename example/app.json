@@ -8,7 +8,7 @@
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "expo.modules.ar.example"
+      "bundleIdentifier": "expo.module.ar.example"
     },
     "android": {
       "adaptiveIcon": {
@@ -18,7 +18,10 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "expo.modules.ar.example"
+      "package": "expo.module.ar.example",
+      "permissions": [
+        "android.permission.CAMERA"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"

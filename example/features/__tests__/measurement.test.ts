@@ -7,6 +7,7 @@ import {
   formatLength,
   measure,
   perimeter,
+  segments,
 } from '../measurement';
 
 type Vec3 = { x: number; y: number; z: number };
@@ -32,6 +33,22 @@ describe('distance', () => {
 
   it('handles a non-axis-aligned vector', () => {
     expect(distance(v(0, 0, 0), v(1, 2, 2))).toBe(3);
+  });
+});
+
+describe('segments', () => {
+  it('is empty with fewer than 2 points', () => {
+    expect(segments([])).toEqual([]);
+    expect(segments([v(0, 0, 0)])).toEqual([]);
+  });
+
+  it('returns n-1 per-edge lengths for the open path', () => {
+    // 3-4-5 triangle as an open chain: edges 3, then 5 (from (3,0,0) to (0,4,0))
+    expect(segments([v(0, 0, 0), v(3, 0, 0), v(0, 4, 0)])).toEqual([3, 5]);
+  });
+
+  it('returns unit lengths for collinear unit-spaced points', () => {
+    expect(segments([v(0, 0, 0), v(1, 0, 0), v(2, 0, 0)])).toEqual([1, 1]);
   });
 });
 
@@ -109,7 +126,13 @@ describe('formatArea', () => {
 
 describe('measure (derivation from core anchors)', () => {
   it('returns all-null for an empty anchor list', () => {
-    expect(measure([])).toEqual({ points: [], distance: null, perimeter: null, area: null });
+    expect(measure([])).toEqual({
+      points: [],
+      segments: [],
+      distance: null,
+      perimeter: null,
+      area: null,
+    });
   });
 
   it('is all-null with a single anchor', () => {
@@ -123,6 +146,7 @@ describe('measure (derivation from core anchors)', () => {
     const r = measure([anchorAt('a', 0, 0, 0), anchorAt('b', 3, 4, 0)]);
     expect(r.distance).toBe(5);
     expect(r.perimeter).toBe(5);
+    expect(r.segments).toEqual([5]);
     expect(r.area).toBeNull();
     expect(r.points).toEqual([
       { x: 0, y: 0, z: 0 },
@@ -130,8 +154,11 @@ describe('measure (derivation from core anchors)', () => {
     ]);
   });
 
-  it('derives area with 3+ anchors', () => {
+  it('derives area and per-segment lengths with 3+ anchors', () => {
     const r = measure([anchorAt('a', 0, 0, 0), anchorAt('b', 3, 0, 0), anchorAt('c', 0, 4, 0)]);
     expect(r.area).toBeCloseTo(6, 6);
+    expect(r.segments).toEqual([3, 5]);
+    // distance tracks the LAST segment (b→c), not the whole path
+    expect(r.distance).toBe(5);
   });
 });

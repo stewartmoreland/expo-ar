@@ -11,10 +11,16 @@ open class ExpoArView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   let onTrackingStateChange = EventDispatcher()
   let onTap = EventDispatcher()
   let onAnchorsChange = EventDispatcher()
+  let onProjection = EventDispatcher()
   let onError = EventDispatcher()
 
   public let sceneView = ARSCNView(frame: .zero)
   public private(set) var anchorsById: [String: ARAnchor] = [:]
+  // Swift Dictionary does NOT preserve insertion order, but a measuring tape connects
+  // points in the order they were placed (1→2→3). We track that order explicitly so
+  // serialize/projection emit anchors in placement order — matching Android's
+  // LinkedHashMap, which already preserves insertion order (Swift/Kotlin parity).
+  private var anchorOrder: [String] = []
 
   // Feature-layer render map (used by the placement feature). The CORE never reads or
   // writes this — removeAnchor/resetSession stay untouched, so the session/anchor logic
@@ -23,6 +29,10 @@ open class ExpoArView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
 
   private var planeDetection: ARWorldTrackingConfiguration.PlaneDetection = [.horizontal, .vertical]
   private var depthEnabled = true
+  // Opt-in per-frame projection of anchors → screen, gated to ~30fps. Off by default so
+  // non-measurement screens pay nothing. lastProjectionEmit is in ARFrame.timestamp units.
+  private var emitProjections = false
+  private var lastProjectionEmit: TimeInterval = 0
   private var didReportReady = false
   // True only while the session is intentionally paused by JS, so foregrounding
   // doesn't silently resume a session the app asked to stop.
@@ -98,6 +108,10 @@ open class ExpoArView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     sceneView.debugOptions = on ? [.showFeaturePoints, .showWorldOrigin] : []
   }
 
+  func setEmitProjections(_ on: Bool) {
+    emitProjections = on
+  }
+
   // MARK: - Session lifecycle
   private func runSession() {
     let config = ARWorldTrackingConfiguration()
@@ -123,6 +137,7 @@ open class ExpoArView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
 
   func resetSession() {
     anchorsById.removeAll()
+    anchorOrder.removeAll()
     let config = sceneView.session.configuration ?? ARWorldTrackingConfiguration()
     sceneView.session.run(config, options: [.resetTracking, .removeExistingAnchors])
     emitAnchors()
@@ -153,6 +168,52 @@ open class ExpoArView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
 
   public func session(_ session: ARSession, didFailWithError error: Error) {
     onError(["code": "session_failed", "message": error.localizedDescription])
+  }
+
+  // MARK: - Per-frame projection (opt-in via emitProjections)
+  // Projects each anchor's world position to screen points so a 2D HUD can pin labels
+  // that track in 3D. Throttled to ~30fps; skipped while not tracking or with <2 anchors.
+  public func session(_ session: ARSession, didUpdate frame: ARFrame) {
+    guard emitProjections, anchorsById.count >= 2 else { return }
+    guard case .normal = frame.camera.trackingState else { return }
+    if frame.timestamp - lastProjectionEmit < 1.0 / 30.0 { return }
+    lastProjectionEmit = frame.timestamp
+
+    let camInverse = simd_inverse(frame.camera.transform)
+    let points: [[String: Any]] = orderedAnchorIds().map { id in
+      let column = anchorsById[id]!.transform.columns.3
+      return projected(id: id, worldX: column.x, worldY: column.y, worldZ: column.z,
+                       camInverse: camInverse)
+    }
+    onProjection(["points": points])
+  }
+
+  private func orderedAnchorIds() -> [String] {
+    anchorOrder.filter { anchorsById[$0] != nil }
+  }
+
+  // ARSCNView.projectPoint returns view-space points (top-left origin) — the same space
+  // RN lays out in and that onTap reports, so no scale/flip is needed. inFront is derived
+  // in camera space (ARKit cameras look down -z), which is robust for points behind you.
+  private func projected(id: String, worldX: Float, worldY: Float, worldZ: Float,
+                         camInverse: simd_float4x4) -> [String: Any] {
+    let screen = sceneView.projectPoint(SCNVector3(worldX, worldY, worldZ))
+    let local = camInverse * simd_float4(worldX, worldY, worldZ, 1)
+    return [
+      "id": id,
+      "x": Double(screen.x),
+      "y": Double(screen.y),
+      "inFront": local.z < 0,
+    ]
+  }
+
+  /// One-shot world→screen projection of a transform's translation. Returns nil when
+  /// there's no current frame. id is empty (no owning anchor for an ad-hoc point).
+  func worldToScreen(_ m: [Double]) -> [String: Any]? {
+    guard m.count == 16, let frame = sceneView.session.currentFrame else { return nil }
+    let camInverse = simd_inverse(frame.camera.transform)
+    return projected(id: "", worldX: Float(m[12]), worldY: Float(m[13]), worldZ: Float(m[14]),
+                     camInverse: camInverse)
   }
 
   // MARK: - Tap forwarding (features may raycast/addAnchor in JS on tap)
@@ -188,19 +249,28 @@ open class ExpoArView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     }
     let anchor = ARAnchor(transform: result.worldTransform)
     sceneView.session.add(anchor: anchor)
-    anchorsById[anchor.identifier.uuidString] = anchor
+    let id = anchor.identifier.uuidString
+    anchorsById[id] = anchor
+    anchorOrder.append(id)
     emitAnchors()
-    return ["id": anchor.identifier.uuidString]
+    return ["id": id]
   }
 
   func removeAnchor(id: String) {
     if let anchor = anchorsById.removeValue(forKey: id) {
+      anchorOrder.removeAll { $0 == id }
       sceneView.session.remove(anchor: anchor)
       emitAnchors()
     }
   }
 
-  func listAnchors() -> [[String: Any]] { anchorsById.values.map(serialize) }
+  func listAnchors() -> [[String: Any]] { orderedAnchors().map(serialize) }
+
+  // Anchors in placement order (see anchorOrder). compactMap guards against any id that
+  // somehow lost its dictionary entry.
+  private func orderedAnchors() -> [ARAnchor] {
+    anchorOrder.compactMap { anchorsById[$0] }
+  }
 
   func snapshotBase64() -> String {
     sceneView.snapshot().jpegData(compressionQuality: 0.8)?.base64EncodedString() ?? ""
@@ -244,7 +314,7 @@ open class ExpoArView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
 
   // MARK: - Anchor serialization (column-major 16-float transform — matches the contract)
   private func emitAnchors() {
-    onAnchorsChange(["anchors": anchorsById.values.map(serialize)])
+    onAnchorsChange(["anchors": orderedAnchors().map(serialize)])
   }
 
   private func serialize(_ anchor: ARAnchor) -> [String: Any] {

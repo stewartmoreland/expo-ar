@@ -3,9 +3,15 @@
   "version": "1.0.0",
   "main": "index.ts",
   "dependencies": {
+    "babel-preset-expo": "~56.0.0",
     "expo": "~56.0.8",
+    "expo-blur": "~56.0.3",
+    "expo-dev-client": "~56.0.18",
+    "expo-haptics": "~56.0.3",
+    "expo-system-ui": "~56.0.5",
     "react": "19.2.3",
-    "react-native": "0.85.3"
+    "react-native": "0.85.3",
+    "react-native-safe-area-context": "~5.7.0"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
@@ -15,7 +21,8 @@
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "postinstall": "cd .. && npm install --include=dev --ignore-scripts"
   },
   "private": true,
   "expo": {

@@ -39,11 +39,13 @@ class ExpoArModule : Module() {
     View(ExpoArView::class) {
       // Event names are byte-for-byte identical to the Swift side — drift here is
       // the #1 "event never fires" bug.
-      Events("onReady", "onTrackingStateChange", "onTap", "onAnchorsChange", "onError")
+      Events(
+        "onReady", "onTrackingStateChange", "onTap", "onAnchorsChange", "onProjection", "onError")
 
       Prop("planeDetection") { view: ExpoArView, mode: String -> view.setPlaneDetection(mode) }
       Prop("depthEnabled") { view: ExpoArView, on: Boolean -> view.setDepthEnabled(on) }
       Prop("debug") { view: ExpoArView, on: Boolean -> view.setDebug(on) }
+      Prop("emitProjections") { view: ExpoArView, on: Boolean -> view.setEmitProjections(on) }
 
       AsyncFunction("raycast") { view: ExpoArView, x: Double, y: Double ->
         view.raycast(x.toFloat(), y.toFloat())
@@ -57,6 +59,9 @@ class ExpoArModule : Module() {
       AsyncFunction("resume") { view: ExpoArView -> view.resumeSession() }
       AsyncFunction("reset") { view: ExpoArView -> view.resetSession() }
       AsyncFunction("snapshot") { view: ExpoArView -> view.snapshotBase64() }
+      AsyncFunction("worldToScreen") { view: ExpoArView, transform: List<Double> ->
+        view.worldToScreen(transform)
+      }
 
       // Additive rendering primitives — used by the placement feature. These attach/
       // detach a renderable on an existing anchor; they don't touch session/anchor core.
