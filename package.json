@@ -19,6 +19,17 @@
     "expo-ar",
     "ExpoAr"
   ],
+  "files": [
+    "build",
+    "plugin/build",
+    "app.plugin.js",
+    "expo-module.config.json",
+    "ios/ExpoArModule.swift",
+    "ios/ExpoArView.swift",
+    "ios/ExpoAr.podspec",
+    "android/build.gradle",
+    "android/src/main"
+  ],
   "repository": "https://github.com/stewartmoreland/expo-ar",
   "bugs": {
     "url": "https://github.com/stewartmoreland/expo-ar/issues"

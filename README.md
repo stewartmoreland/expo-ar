@@ -2,6 +2,7 @@
 
 > An open-source Expo native module that bridges **Apple ARKit** (iOS) and **Google ARCore** (Android) into a single React Native augmented-reality view.
 
+[![CI](https://github.com/stewartmoreland/expo-ar/actions/workflows/ci.yml/badge.svg)](https://github.com/stewartmoreland/expo-ar/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 
 > **Status: early-stage / foundation.** The module scaffold is in place; the native ARKit and ARCore implementations are still being built. The API described under [Planned API](#planned-api) is the **target contract** — treat anything below as in progress until it lands.
@@ -35,7 +36,36 @@ The two can coexist in one app, but never run on the same screen at the same tim
 npx expo install expo-ar
 ```
 
-A config plugin (camera permission, ARKit/ARCore manifest entries, Gradle dependency) and an `expo prebuild` step will be required. _(Config plugin is planned — see the roadmap.)_
+Then add the **config plugin** to your `app.json` (or `app.config.js`) and run a
+prebuild. The plugin sets the iOS camera-usage description, the Android camera
+permission, and the ARKit/ARCore manifest entries.
+
+```json
+{
+  "expo": {
+    "plugins": [
+      [
+        "expo-ar",
+        {
+          "cameraPermission": "Allow $(PRODUCT_NAME) to use the camera for AR.",
+          "arRequired": false
+        }
+      ]
+    ]
+  }
+}
+```
+
+| Option             | Type      | Default                                              | Effect |
+| ------------------ | --------- | ---------------------------------------------------- | ------ |
+| `cameraPermission` | `string`  | `"This app uses the camera for augmented reality."`  | iOS `NSCameraUsageDescription` prompt text. |
+| `arRequired`       | `boolean` | `false`                                              | When `true`, the app installs **only on AR-capable devices**: iOS adds `arkit` to `UIRequiredDeviceCapabilities`; Android marks ARCore `required`. Leave `false` to keep the non-AR (`expo-camera`) fallback reachable on devices without AR. |
+
+Because AR requires native code, you must use a **development build** — `expo prebuild` followed by EAS Build or a local build. **Expo Go cannot run this.**
+
+```sh
+npx expo prebuild
+```
 
 ## Capability tiers
 

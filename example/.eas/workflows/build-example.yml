@@ -1,0 +1,36 @@
+# Builds installable dev-client artifacts for the expo-ar example app.
+#
+# Lives under example/ because an EAS Workflow must sit beside the eas.json it
+# targets, and the only buildable Expo app in this repo is example/.
+#
+# Prerequisites (run once, locally, with an Expo account — not done by CI):
+#   1. cd example && eas init   # creates the EAS project + writes extra.eas.projectId into app.json
+#   2. Connect the repo to the EAS GitHub app so push-to-main auto-runs this,
+#      or trigger on demand:  eas workflow:run .eas/workflows/build-example.yml
+#   3. iOS internal-distribution credentials are set up by EAS on the first run.
+#
+# The "development" profile in example/eas.json already sets developmentClient:
+# true, distribution: internal, and ios.simulator: false -> installable on-device
+# dev-client artifacts.
+
+name: Build example dev client
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  build_android:
+    name: Android dev build
+    type: build
+    params:
+      platform: android
+      profile: development
+
+  build_ios:
+    name: iOS dev build
+    type: build
+    params:
+      platform: ios
+      profile: development
