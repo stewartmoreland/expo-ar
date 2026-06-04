@@ -4,11 +4,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Glass, haptic } from './controls';
 import { LAYOUT, colors, radii } from './theme';
 
-export type DemoMode = 'measure' | 'place';
+export type DemoMode = 'measure' | 'place' | 'geo';
 
 const OPTIONS: { key: DemoMode; label: string }[] = [
   { key: 'measure', label: 'Measure' },
   { key: 'place', label: 'Place' },
+  { key: 'geo', label: 'Geo' },
 ];
 
 // Top-anchored glass segmented control. Owns its own safe-area positioning; the HUDs

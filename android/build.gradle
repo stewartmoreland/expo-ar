@@ -28,6 +28,10 @@ dependencies {
   // 2.3.0 targets Kotlin 2.0.21, matching Expo SDK 56's default Kotlin version.
   implementation "io.github.sceneview:arsceneview:2.3.0"
 
+  // ARCore Geospatial (Earth API) localizes against Google's VPS using device location;
+  // the Geospatial developer guide requires Fused Location Provider on the classpath.
+  implementation "com.google.android.gms:play-services-location:21.3.0"
+
   // ARSceneView's constructor signature references androidx.activity.ComponentActivity
   // (an optional sharedActivity param), so the type must be on our compile classpath
   // even though SceneView only exposes it via `implementation`. Pinned to the version

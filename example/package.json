@@ -8,6 +8,7 @@
     "expo-blur": "~56.0.3",
     "expo-dev-client": "~56.0.18",
     "expo-haptics": "~56.0.3",
+    "expo-location": "~56.0.0",
     "expo-system-ui": "~56.0.5",
     "react": "19.2.3",
     "react-native": "0.85.3",

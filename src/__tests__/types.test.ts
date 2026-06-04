@@ -3,6 +3,9 @@ import {
   AnchorsEvent,
   Capabilities,
   ErrorEvent,
+  GeoAnchorInput,
+  GeoStateEvent,
+  GeospatialPose,
   ProjectedPoint,
   ProjectionEvent,
   RaycastResult,
@@ -10,6 +13,7 @@ import {
   TapEvent,
   TrackingStateEvent,
   Transform,
+  VpsAvailability,
 } from '../ExpoAr.types';
 import { distanceBetween, positionOf } from '../transform';
 
@@ -56,7 +60,9 @@ describe('transform helpers', () => {
 
 describe('event payload schemas (round-trip)', () => {
   it('ReadyEvent parses a valid payload and rejects a renamed key', () => {
-    const payload = { capabilities: { arSupported: true, depthOrLidarAvailable: false } };
+    const payload = {
+      capabilities: { arSupported: true, depthOrLidarAvailable: false, geoTrackingSupported: false },
+    };
     expect(ReadyEvent.parse(payload)).toEqual(payload);
     expect(() => ReadyEvent.parse({ capability: payload.capabilities })).toThrow();
   });
@@ -111,7 +117,7 @@ describe('Anchor / Capabilities / RaycastResult', () => {
   });
 
   it('Capabilities round-trips', () => {
-    const payload = { arSupported: true, depthOrLidarAvailable: true };
+    const payload = { arSupported: true, depthOrLidarAvailable: true, geoTrackingSupported: true };
     expect(Capabilities.parse(payload)).toEqual(payload);
   });
 
@@ -123,5 +129,45 @@ describe('Anchor / Capabilities / RaycastResult', () => {
       worldTransform: null,
       target: null,
     });
+  });
+});
+
+describe('geospatial extension schemas', () => {
+  const pose = {
+    latitude: 37.422,
+    longitude: -122.084,
+    altitude: 10,
+    horizontalAccuracy: 1,
+    verticalAccuracy: 1.5,
+    headingAccuracy: 8,
+  };
+
+  it('GeospatialPose round-trips and rejects a missing accuracy field', () => {
+    expect(GeospatialPose.parse(pose)).toEqual(pose);
+    const { headingAccuracy: _omit, ...missing } = pose;
+    expect(() => GeospatialPose.parse(missing)).toThrow();
+  });
+
+  it('GeoStateEvent accepts a localized pose and a null pose', () => {
+    expect(GeoStateEvent.parse({ state: 'localized', pose })).toEqual({ state: 'localized', pose });
+    expect(GeoStateEvent.parse({ state: 'initializing', pose: null })).toEqual({
+      state: 'initializing',
+      pose: null,
+    });
+    expect(() => GeoStateEvent.parse({ state: 'tracking', pose: null })).toThrow();
+  });
+
+  it('GeoAnchorInput allows null altitude (terrain) and defaults heading to 0', () => {
+    expect(GeoAnchorInput.parse({ latitude: 1, longitude: 2, altitude: null })).toEqual({
+      latitude: 1,
+      longitude: 2,
+      altitude: null,
+      heading: 0,
+    });
+  });
+
+  it('VpsAvailability rejects unknown values', () => {
+    expect(VpsAvailability.parse('available')).toBe('available');
+    expect(() => VpsAvailability.parse('maybe')).toThrow();
   });
 });

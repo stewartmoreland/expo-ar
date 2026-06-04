@@ -1,6 +1,6 @@
 ---
 name: expo-ar
-description: Build a custom Expo native module (`expo-ar`) that bridges Apple's ARKit (Swift) and Google's ARCore (Kotlin) into one React Native view — the foundation for any on-device AR feature, covering world tracking, plane detection, hit-testing/raycasting, anchors, placing 3D content, room scanning, and LiDAR (iOS) / ARCore Depth API (Android). Use this whenever the user wants AR in an Expo/React Native app, a native AR camera view, ARKit or ARCore integration, world-anchored overlays, tap-to-place 3D objects, surface/plane detection, or depth/LiDAR scanning — or asks how expo-camera relates to AR (a confusion this corrects). Trigger even when they only say things like 'add AR to my app,' 'place a model in the real world,' 'scan a room,' or name just one SDK, and use it as the base for specific AR features like measurement, since those build on this module. It is use-case agnostic; measurement and object placement are worked examples on the same core.
+description: Build a custom Expo native module (`expo-ar`) that bridges Apple's ARKit (Swift) and Google's ARCore (Kotlin) into one React Native view — the foundation for any on-device AR feature, covering world tracking, plane detection, hit-testing/raycasting, anchors, placing 3D content, room scanning, and LiDAR (iOS) / ARCore Depth API (Android). Use this whenever the user wants AR in an Expo/React Native app, a native AR camera view, ARKit or ARCore integration, world-anchored overlays, tap-to-place 3D objects, surface/plane detection, depth/LiDAR scanning, or geospatial/VPS anchoring by GPS — or asks how expo-camera relates to AR (a confusion this corrects). Trigger even when they only say things like 'add AR to my app,' 'place a model in the real world,' 'scan a room,' or name just one SDK, and use it as the base for specific AR features like measurement, since those build on this module. It is use-case agnostic; measurement and object placement are worked examples on the same core.
 ---
 
 # expo-ar — a custom ARKit + ARCore module for Expo
@@ -53,7 +53,7 @@ Read the references in this order; the contract is the glue, the platform files 
 | **iOS core** | Generic ARKit module/view: session, lifecycle, tracking, raycast, anchors, planes, LiDAR mesh, frame buffer | `references/ios-arkit.md` |
 | **Android core** | Generic ARCore module/view: session + install flow, config, depth, hit-test, anchors, planes, frame image | `references/android-arcore.md` |
 | **Build config** | Local-module scaffold, config plugin, `app.json`, prebuild | `references/config-plugin.md` |
-| **Examples** | Measurement (`examples/measurement.md`) · tap-to-place objects (`examples/object-placement.md`) | `references/examples/` |
+| **Examples** | Measurement (`examples/measurement.md`) · tap-to-place objects (`examples/object-placement.md`) · geospatial/VPS anchoring (`examples/geospatial.md`, a core-level extension) | `references/examples/` |
 
 Don't hold all five in your head at once. Lock the contract, implement the platform core(s), then compose the feature from an example.
 
@@ -129,4 +129,4 @@ Both ARKit and ARCore use a right-handed, Y-up world space measured in **meters*
 
 ---
 
-Once a blank tracking view, the raycast primitive, and anchors work end-to-end on a real device, compose the target feature from an example and layer the HUD. Natural next steps to offer: anchor persistence (ARWorldMap / ARCore Cloud Anchors), mesh occlusion, and fusing on-device CV with raycasting for detect-then-place or detect-then-measure flows.
+Once a blank tracking view, the raycast primitive, and anchors work end-to-end on a real device, compose the target feature from an example and layer the HUD. Natural next steps to offer: anchor persistence (ARWorldMap / ARCore Cloud Anchors), mesh occlusion, fusing on-device CV with raycasting for detect-then-place or detect-then-measure flows, and world-scale **geospatial/VPS anchoring** (place content at real lat/long) — see `references/examples/geospatial.md`, which is a core-level extension (it changes the session configuration and adds an auth/build setup) rather than a pure feature.

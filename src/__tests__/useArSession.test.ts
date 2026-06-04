@@ -18,7 +18,7 @@ describe('arSessionReducer (pure)', () => {
   });
 
   it('ready action stores capabilities', () => {
-    const caps = { arSupported: true, depthOrLidarAvailable: false };
+    const caps = { arSupported: true, depthOrLidarAvailable: false, geoTrackingSupported: false };
     expect(arSessionReducer(initialArSessionState, { type: 'ready', caps }).caps).toEqual(caps);
   });
 
@@ -53,14 +53,20 @@ describe('useArSession (hook wiring)', () => {
 
     act(() => {
       result.current.handlers.onReady({
-        nativeEvent: { capabilities: { arSupported: true, depthOrLidarAvailable: true } },
+        nativeEvent: {
+          capabilities: { arSupported: true, depthOrLidarAvailable: true, geoTrackingSupported: true },
+        },
       });
       result.current.handlers.onAnchorsChange({
         nativeEvent: { anchors: [{ id: 'a1', transform: new Array(16).fill(0), type: 'plane' }] },
       });
     });
 
-    expect(result.current.caps).toEqual({ arSupported: true, depthOrLidarAvailable: true });
+    expect(result.current.caps).toEqual({
+      arSupported: true,
+      depthOrLidarAvailable: true,
+      geoTrackingSupported: true,
+    });
     expect(result.current.anchors).toHaveLength(1);
   });
 

@@ -1,6 +1,15 @@
 import ARKit
 import ExpoModulesCore
 
+// Geospatial extension: input for addGeoAnchor. altitude == nil → ground/terrain level.
+// heading is part of the shared contract but unused on iOS (ARGeoAnchor has no heading).
+struct GeoAnchorInput: Record {
+  @Field var latitude: Double = 0
+  @Field var longitude: Double = 0
+  @Field var altitude: Double?
+  @Field var heading: Double = 0
+}
+
 public class ExpoArModule: Module {
   public func definition() -> ModuleDefinition {
     Name("ExpoAr")
@@ -13,6 +22,8 @@ public class ExpoArModule: Module {
         "arSupported": ARWorldTrackingConfiguration.isSupported,
         "depthOrLidarAvailable":
           ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh),
+        // Geospatial extension: VPS/geo tracking capability (independent of coverage).
+        "geoTrackingSupported": ARGeoTrackingConfiguration.isSupported,
       ]
     }
 
@@ -20,7 +31,8 @@ public class ExpoArModule: Module {
       // Event names are byte-for-byte identical to the Kotlin side — drift here
       // is the #1 "event never fires" bug.
       Events(
-        "onReady", "onTrackingStateChange", "onTap", "onAnchorsChange", "onProjection", "onError")
+        "onReady", "onTrackingStateChange", "onTap", "onAnchorsChange", "onProjection",
+        "onGeoStateChange", "onError")
 
       Prop("planeDetection") { (view: ExpoArView, mode: String) in
         view.setPlaneDetection(mode)
@@ -33,6 +45,10 @@ public class ExpoArModule: Module {
       }
       Prop("emitProjections") { (view: ExpoArView, on: Bool) in
         view.setEmitProjections(on)
+      }
+      // Geospatial extension: "world" | "geo" — switches the session configuration.
+      Prop("trackingMode") { (view: ExpoArView, mode: String) in
+        view.setTrackingMode(mode)
       }
 
       // Generic primitives — features compose these via the imperative ref.
@@ -54,6 +70,19 @@ public class ExpoArModule: Module {
       AsyncFunction("snapshot") { (view: ExpoArView) -> String in view.snapshotBase64() }
       AsyncFunction("worldToScreen") { (view: ExpoArView, transform: [Double]) -> [String: Any]? in
         view.worldToScreen(transform)
+      }
+
+      // Geospatial extension primitives — active only while trackingMode is "geo". The two
+      // ARKit calls are async (completion handlers), so they resolve via a Promise.
+      AsyncFunction("checkVpsAvailability") {
+        (view: ExpoArView, latitude: Double, longitude: Double, promise: Promise) in
+        view.checkVpsAvailability(latitude, longitude) { result in promise.resolve(result) }
+      }
+      AsyncFunction("addGeoAnchor") { (view: ExpoArView, input: GeoAnchorInput) -> [String: Any]? in
+        view.addGeoAnchor(input.latitude, input.longitude, input.altitude)
+      }
+      AsyncFunction("getGeospatialPose") { (view: ExpoArView, promise: Promise) in
+        view.getGeospatialPose { pose in promise.resolve(pose) }
       }
 
       // Additive rendering primitives — used by the placement feature. These attach/

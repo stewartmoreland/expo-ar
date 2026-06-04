@@ -1,13 +1,16 @@
 import { ExpoArView, getCapabilities, type Capabilities, type TapEvent } from 'expo-ar';
-import { useCallback, useMemo, useState } from 'react';
+import * as Location from 'expo-location';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
+import { GeoHUD } from './features/GeoHUD';
 import { MeasureHUD } from './features/MeasureHUD';
 import { MeasurementLabels } from './features/MeasurementLabels';
 import { ModeSwitch, type DemoMode } from './features/ModeSwitch';
 import { PlacementHUD } from './features/PlacementHUD';
 import { type MeasureMode, type Unit } from './features/measurement';
+import { useArGeo } from './features/useArGeo';
 import { useArMeasure } from './features/useArMeasure';
 import { useArPlacement } from './features/useArPlacement';
 
@@ -21,7 +24,7 @@ export default function App() {
     try {
       return getCapabilities();
     } catch {
-      return { arSupported: false, depthOrLidarAvailable: false };
+      return { arSupported: false, depthOrLidarAvailable: false, geoTrackingSupported: false };
     }
   }, []);
 
@@ -50,7 +53,7 @@ function ArRoot() {
 
   return (
     <View style={styles.container}>
-      {mode === 'measure' ? <MeasureDemo /> : <PlacementDemo />}
+      {mode === 'measure' ? <MeasureDemo /> : mode === 'place' ? <PlacementDemo /> : <GeoDemo />}
       <ModeSwitch mode={mode} onChange={setMode} />
     </View>
   );
@@ -134,6 +137,52 @@ function PlacementDemo() {
         onPlace={() => p.placeAtCenter()}
         onRemoveLast={p.removeLast}
         onClear={p.clear}
+      />
+    </View>
+  );
+}
+
+// Geospatial demo: switch the session to VPS/geo tracking (trackingMode="geo"), wait until
+// localized with good accuracy, then drop an anchor at the device's real lat/long. Geo anchors
+// flow through the SAME core onAnchorsChange (type "geo") — the demo only adds the geo source
+// and localization gating. Requires being outdoors in VPS-covered, well-lit conditions.
+function GeoDemo() {
+  const g = useArGeo();
+  const [vps, setVps] = useState('unknown');
+  const checkedRef = useRef(false);
+
+  // ARKit/ARCore geospatial localization needs foreground location permission.
+  useEffect(() => {
+    void Location.requestForegroundPermissionsAsync().catch(() => {});
+  }, []);
+
+  // Once we have a pose, check VPS coverage at the current location (capability ≠ coverage).
+  useEffect(() => {
+    if (g.pose && !checkedRef.current) {
+      checkedRef.current = true;
+      g.checkVps(g.pose.latitude, g.pose.longitude)
+        .then((r) => r && setVps(r))
+        .catch(() => {});
+    }
+  }, [g]);
+
+  return (
+    <View style={StyleSheet.absoluteFill}>
+      <ExpoArView
+        ref={g.ref}
+        style={StyleSheet.absoluteFill}
+        planeDetection="horizontal"
+        trackingMode="geo"
+        {...g.handlers}
+      />
+      <GeoHUD
+        geoState={g.geoState}
+        pose={g.pose}
+        canPlace={g.canPlace}
+        count={g.geoCount}
+        vps={vps}
+        onDrop={() => void g.dropAnchorHere()}
+        onClear={g.clear}
       />
     </View>
   );

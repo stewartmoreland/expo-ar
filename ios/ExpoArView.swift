@@ -1,4 +1,5 @@
 import ARKit
+import CoreLocation
 import ExpoModulesCore
 import SceneKit
 
@@ -12,6 +13,7 @@ open class ExpoArView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   let onTap = EventDispatcher()
   let onAnchorsChange = EventDispatcher()
   let onProjection = EventDispatcher()
+  let onGeoStateChange = EventDispatcher()
   let onError = EventDispatcher()
 
   public let sceneView = ARSCNView(frame: .zero)
@@ -37,6 +39,22 @@ open class ExpoArView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   // True only while the session is intentionally paused by JS, so foregrounding
   // doesn't silently resume a session the app asked to stop.
   private var pausedByUser = false
+
+  // ---- Geospatial extension state ----
+  // "world" (default) runs ARWorldTrackingConfiguration; "geo" runs ARGeoTrackingConfiguration.
+  private var trackingMode = "world"
+  // Core Location is required for geo tracking (authorization gate); retained so it isn't
+  // deallocated mid-prompt.
+  private let locationManager = CLLocationManager()
+  private var geoState = "initializing"
+  // ARKit reports a coarse ARGeoTrackingStatus.Accuracy (not meters); we cache it and map to
+  // representative meter/degree values when building a GeospatialPose.
+  private var lastGeoAccuracy: ARGeoTrackingStatus.Accuracy = .undetermined
+  // Latest lat/long/altitude from getGeoLocation(forPoint:) (async), reused between refreshes.
+  private var cachedGeoPose: [String: Any]?
+  private var lastGeoEmit: TimeInterval = 0
+  private var lastGeoLocationRequest: TimeInterval = 0
+  private var pendingGeoLocation = false
 
   required public init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
@@ -112,8 +130,23 @@ open class ExpoArView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     emitProjections = on
   }
 
+  // Geospatial extension: switch the session configuration. Restarting is required — a
+  // session runs exactly one configuration at a time. No-op if the mode is unchanged.
+  func setTrackingMode(_ mode: String) {
+    let normalized = (mode == "geo") ? "geo" : "world"
+    guard normalized != trackingMode else { return }
+    trackingMode = normalized
+    geoState = "initializing"
+    cachedGeoPose = nil
+    runSession()
+  }
+
   // MARK: - Session lifecycle
   private func runSession() {
+    if trackingMode == "geo" {
+      runGeoSession()
+      return
+    }
     let config = ARWorldTrackingConfiguration()
     config.planeDetection = planeDetection
     config.environmentTexturing = .automatic
@@ -124,6 +157,23 @@ open class ExpoArView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     {
       config.sceneReconstruction = .meshWithClassification
     }
+    pausedByUser = false
+    sceneView.session.run(config)
+  }
+
+  // Geospatial extension: run ARGeoTrackingConfiguration (pure ARKit + Core Location). Falls
+  // back to world tracking and reports onError when the device/region can't support geo.
+  private func runGeoSession() {
+    guard ARGeoTrackingConfiguration.isSupported else {
+      onError(["code": "geo_unsupported", "message": "Geo tracking needs A12+ and GPS."])
+      trackingMode = "world"
+      runSession()
+      return
+    }
+    // ARGeoTrackingConfiguration requires location authorization.
+    locationManager.requestWhenInUseAuthorization()
+    let config = ARGeoTrackingConfiguration()
+    config.planeDetection = planeDetection
     pausedByUser = false
     sceneView.session.run(config)
   }
@@ -161,6 +211,7 @@ open class ExpoArView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
           "arSupported": true,
           "depthOrLidarAvailable":
             ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh),
+          "geoTrackingSupported": ARGeoTrackingConfiguration.isSupported,
         ]
       ])
     }
@@ -170,10 +221,26 @@ open class ExpoArView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     onError(["code": "session_failed", "message": error.localizedDescription])
   }
 
+  // MARK: - Geospatial tracking state (ARSessionDelegate)
+  // Drives onGeoStateChange on geo-tracking transitions; the per-frame loop emits throttled
+  // pose updates. Accuracy is cached here (ARKit reports a coarse enum, not meters).
+  public func session(_ session: ARSession, didChange geoTrackingStatus: ARGeoTrackingStatus) {
+    lastGeoAccuracy = geoTrackingStatus.accuracy
+    switch geoTrackingStatus.state {
+    case .notAvailable: geoState = "unavailable"
+    case .initializing: geoState = "initializing"
+    case .localizing: geoState = "localizing"
+    case .localized: geoState = "localized"
+    @unknown default: geoState = "unavailable"
+    }
+    onGeoStateChange(["state": geoState, "pose": cachedGeoPose ?? NSNull()])
+  }
+
   // MARK: - Per-frame projection (opt-in via emitProjections)
   // Projects each anchor's world position to screen points so a 2D HUD can pin labels
   // that track in 3D. Throttled to ~30fps; skipped while not tracking or with <2 anchors.
   public func session(_ session: ARSession, didUpdate frame: ARFrame) {
+    emitGeoIfNeeded(frame)
     guard emitProjections, anchorsById.count >= 2 else { return }
     guard case .normal = frame.camera.trackingState else { return }
     if frame.timestamp - lastProjectionEmit < 1.0 / 30.0 { return }
@@ -276,6 +343,113 @@ open class ExpoArView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     sceneView.snapshot().jpegData(compressionQuality: 0.8)?.base64EncodedString() ?? ""
   }
 
+  // MARK: - Geospatial extension (active only while trackingMode is "geo")
+
+  // Per-frame: refresh the cached lat/long/altitude (getGeoLocation is async) and emit a
+  // throttled onGeoStateChange so JS sees a steady pose/accuracy stream (matches Android's
+  // earth-pose stream). No-op outside geo mode.
+  private func emitGeoIfNeeded(_ frame: ARFrame) {
+    guard trackingMode == "geo" else { return }
+    let now = frame.timestamp
+
+    if now - lastGeoLocationRequest > 1.0, !pendingGeoLocation,
+      case .normal = frame.camera.trackingState
+    {
+      pendingGeoLocation = true
+      lastGeoLocationRequest = now
+      let cam = frame.camera.transform.columns.3
+      sceneView.session.getGeoLocation(forPoint: simd_float3(cam.x, cam.y, cam.z)) {
+        [weak self] coord, altitude, error in
+        guard let self = self else { return }
+        self.pendingGeoLocation = false
+        if error == nil {
+          self.cachedGeoPose = self.geoPoseDict(coord: coord, altitude: altitude)
+        }
+      }
+    }
+
+    if now - lastGeoEmit < 0.5 { return }
+    lastGeoEmit = now
+    onGeoStateChange(["state": geoState, "pose": cachedGeoPose ?? NSNull()])
+  }
+
+  /// VPS coverage check at a coordinate — resolve "available"|"unavailable"|"unknown".
+  func checkVpsAvailability(_ lat: Double, _ lng: Double, _ resolve: @escaping (String) -> Void) {
+    guard ARGeoTrackingConfiguration.isSupported else {
+      resolve("unavailable")
+      return
+    }
+    let coord = CLLocationCoordinate2D(latitude: lat, longitude: lng)
+    ARGeoTrackingConfiguration.checkAvailability(at: coord) { available, error in
+      if error != nil {
+        resolve("unknown")
+      } else {
+        resolve(available ? "available" : "unavailable")
+      }
+    }
+  }
+
+  /// Create an ARGeoAnchor at a real coordinate; emits onAnchorsChange (type "geo"). `alt` nil
+  /// → ground level. `heading` from the contract is unused on iOS (ARGeoAnchor has no heading).
+  func addGeoAnchor(_ lat: Double, _ lng: Double, _ alt: Double?) -> [String: Any]? {
+    guard trackingMode == "geo", ARGeoTrackingConfiguration.isSupported else {
+      onError(["code": "not_geo", "message": "Geo tracking is not active."])
+      return nil
+    }
+    let coord = CLLocationCoordinate2D(latitude: lat, longitude: lng)
+    let anchor: ARGeoAnchor =
+      alt != nil ? ARGeoAnchor(coordinate: coord, altitude: alt!) : ARGeoAnchor(coordinate: coord)
+    sceneView.session.add(anchor: anchor)
+    let id = anchor.identifier.uuidString
+    anchorsById[id] = anchor
+    anchorOrder.append(id)
+    emitAnchors()
+    return ["id": id]
+  }
+
+  /// One-shot current device geospatial pose, or nil if not yet localizable.
+  func getGeospatialPose(_ resolve: @escaping ([String: Any]?) -> Void) {
+    guard trackingMode == "geo", let frame = sceneView.session.currentFrame else {
+      resolve(nil)
+      return
+    }
+    let cam = frame.camera.transform.columns.3
+    sceneView.session.getGeoLocation(forPoint: simd_float3(cam.x, cam.y, cam.z)) {
+      [weak self] coord, altitude, error in
+      guard let self = self, error == nil else {
+        resolve(nil)
+        return
+      }
+      resolve(self.geoPoseDict(coord: coord, altitude: altitude))
+    }
+  }
+
+  private func geoPoseDict(coord: CLLocationCoordinate2D, altitude: CLLocationDistance)
+    -> [String: Any]
+  {
+    let (h, v, head) = geoAccuracyMeters()
+    return [
+      "latitude": coord.latitude,
+      "longitude": coord.longitude,
+      "altitude": altitude,
+      "horizontalAccuracy": h,
+      "verticalAccuracy": v,
+      "headingAccuracy": head,
+    ]
+  }
+
+  // ARKit exposes only a coarse ARGeoTrackingStatus.Accuracy, not meters like ARCore. Map to
+  // representative (horizontal, vertical, heading) values so the contract's numeric accuracy
+  // fields are populated; treat these as approximate on iOS.
+  private func geoAccuracyMeters() -> (Double, Double, Double) {
+    switch lastGeoAccuracy {
+    case .high: return (1.0, 1.5, 8.0)
+    case .medium: return (5.0, 8.0, 20.0)
+    case .low: return (25.0, 40.0, 45.0)
+    default: return (9999.0, 9999.0, 180.0)
+    }
+  }
+
   // MARK: - Additive rendering primitives (placement feature)
   // attachModel/detachModel are NEW methods — they don't alter the session/anchor core.
   // The placement hook calls attachModel after addAnchor, and detachModel BEFORE
@@ -318,10 +492,18 @@ open class ExpoArView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   }
 
   private func serialize(_ anchor: ARAnchor) -> [String: Any] {
-    [
+    let type: String
+    if anchor is ARGeoAnchor {
+      type = "geo"
+    } else if anchor is ARPlaneAnchor {
+      type = "plane"
+    } else {
+      type = "point"
+    }
+    return [
       "id": anchor.identifier.uuidString,
       "transform": flatten(anchor.transform),
-      "type": (anchor is ARPlaneAnchor) ? "plane" : "point",
+      "type": type,
     ]
   }
 

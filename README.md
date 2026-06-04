@@ -43,10 +43,13 @@ permission, and the ARKit/ARCore manifest entries.
 }
 ```
 
-| Option             | Type      | Default                                              | Effect |
-| ------------------ | --------- | ---------------------------------------------------- | ------ |
-| `cameraPermission` | `string`  | `"This app uses the camera for augmented reality."`  | iOS `NSCameraUsageDescription` prompt text. |
-| `arRequired`       | `boolean` | `false`                                              | When `true`, the app installs **only on AR-capable devices**: iOS adds `arkit` to `UIRequiredDeviceCapabilities`; Android marks ARCore `required`. Leave `false` to keep the non-AR (`expo-camera`) fallback reachable on devices without AR. |
+| Option               | Type      | Default                                              | Effect |
+| -------------------- | --------- | ---------------------------------------------------- | ------ |
+| `cameraPermission`   | `string`  | `"This app uses the camera for augmented reality."`  | iOS `NSCameraUsageDescription` prompt text. |
+| `arRequired`         | `boolean` | `false`                                              | When `true`, the app installs **only on AR-capable devices**: iOS adds `arkit` to `UIRequiredDeviceCapabilities`; Android marks ARCore `required`. Leave `false` to keep the non-AR (`expo-camera`) fallback reachable on devices without AR. |
+| `geospatial`         | `boolean` | `false`                                              | Enable the geospatial / VPS extension. iOS adds `NSLocationWhenInUseUsageDescription`; Android adds `ACCESS_FINE_LOCATION` (and the API-key meta-data when `arcoreApiKey` is set). See [Geospatial / VPS anchoring](#geospatial--vps-anchoring). |
+| `locationPermission` | `string`  | `"This app uses your location to place augmented reality content at real-world places."` | iOS `NSLocationWhenInUseUsageDescription` text (only used when `geospatial` is `true`). |
+| `arcoreApiKey`       | `string`  | —                                                    | ARCore Geospatial API key, injected as the Android `com.google.android.ar.API_KEY` meta-data. Only used when `geospatial` is `true`. Production apps should prefer **keyless** (server-signed token) auth — see [Geospatial / VPS anchoring](#geospatial--vps-anchoring). |
 
 Because AR requires native code, you must use a **development build** — `expo prebuild` followed by EAS Build or a local build. **Expo Go cannot run this.**
 
@@ -118,15 +121,21 @@ Detect support at runtime and branch; never assume LiDAR/Depth is present.
 | **Good** | ARKit world tracking, no LiDAR       | ARCore, no depth                 | Tracking + planes; accurate on well-lit, textured surfaces and detected planes |
 | **None** | No ARKit                             | Not an ARCore-supported device   | No AR — fall back to `expo-camera` |
 
+`getCapabilities().geoTrackingSupported` is a separate axis: whether the device can do
+geospatial/VPS tracking (`ARGeoTrackingConfiguration.isSupported` on iOS,
+`isGeospatialModeSupported(ENABLED)` on Android). Capability is **not** coverage — always
+`checkVpsAvailability(lat, lng)` before offering geo placement. See
+[Geospatial / VPS anchoring](#geospatial--vps-anchoring).
+
 ## API
 
 Both Swift and Kotlin emit byte-for-byte identical event names and payload keys, and accept identical prop/function signatures. The canonical contract lives in [`src/ExpoAr.types.ts`](./src/ExpoAr.types.ts).
 
 **Module function (no view):**
 
-| Function            | Returns                                          |
-| ------------------- | ------------------------------------------------ |
-| `getCapabilities()` | `{ arSupported, depthOrLidarAvailable }`         |
+| Function            | Returns                                                      |
+| ------------------- | ------------------------------------------------------------ |
+| `getCapabilities()` | `{ arSupported, depthOrLidarAvailable, geoTrackingSupported }` |
 
 **`<ExpoArView />` props (JS → native):**
 
@@ -136,6 +145,7 @@ Both Swift and Kotlin emit byte-for-byte identical event names and payload keys,
 | `depthEnabled`   | `boolean`                                       | Enable LiDAR/Depth (off by default) |
 | `debug`          | `boolean`                                       | Draw detected planes / feature points |
 | `emitProjections`| `boolean`                                       | Opt-in: stream anchor → screen positions each frame via `onProjection` (drives object-pinned 2D labels) |
+| `trackingMode`   | `"world" \| "geo"`                              | `"world"` (default) tracks local space; `"geo"` switches the session to VPS/geo tracking. Changing it restarts the session. See [Geospatial / VPS anchoring](#geospatial--vps-anchoring) |
 
 **Ref functions (JS → native, via view ref):**
 
@@ -150,6 +160,9 @@ Both Swift and Kotlin emit byte-for-byte identical event names and payload keys,
 | `worldToScreen(transform)` | `{ id, x, y, inFront } \| null` — project a 3D point to screen coordinates (the inverse of `raycast`) |
 | `attachModel(anchorId, modelUri)` | Render a model at an anchor — a USDZ/SCN (iOS) or glTF/GLB (Android) URL, or the built-in `"builtin:cube"`. Additive rendering primitive used by tap-to-place |
 | `detachModel(anchorId)` | Remove the model attached to an anchor (leaves the anchor) |
+| `checkVpsAvailability(lat, lng)` | `"available" \| "unavailable" \| "unknown"` — VPS coverage at a coordinate (geo extension) |
+| `addGeoAnchor({ latitude, longitude, altitude, heading })` | `{ id } \| null` — anchor at a real coordinate (`altitude: null` → ground/terrain). Flows through `onAnchorsChange` with `type: "geo"` (geo extension) |
+| `getGeospatialPose()` | `{ latitude, longitude, altitude, horizontalAccuracy, verticalAccuracy, headingAccuracy } \| null` — current device geo pose (geo extension) |
 
 **Events (native → JS):**
 
@@ -160,9 +173,70 @@ Both Swift and Kotlin emit byte-for-byte identical event names and payload keys,
 | `onTap`                 | `{ x, y }` |
 | `onAnchorsChange`       | `{ anchors: [{ id, transform, type }] }` |
 | `onProjection`          | `{ points: [{ id, x, y, inFront }] }` — per-frame, only while `emitProjections` is set |
+| `onGeoStateChange`      | `{ state: "unavailable" \| "initializing" \| "localizing" \| "localized", pose }` — geo-tracking transitions + throttled pose/accuracy, only while `trackingMode` is `"geo"` |
 | `onError`               | `{ code, message }` |
 
 Everything a feature needs is composed from these: measurement = raycast on tap → store world points → compute geometry; object placement = `addAnchor` → attach a model to the anchor. Poses are 4×4 transforms serialized as a 16-number, column-major array; all math is in **meters**.
+
+## Geospatial / VPS anchoring
+
+The geospatial extension places anchors at real **latitude / longitude / altitude** so content
+stays fixed to a *place* across sessions and users (wayfinding, signage, world-scale games). It's
+a **core-level extension, not a pure feature**: setting `trackingMode="geo"` switches the session
+configuration (ARKit `ARGeoTrackingConfiguration` on iOS, ARCore Geospatial / Earth API on
+Android) and adds a tracking mode. Geo anchors still flow through `onAnchorsChange` — they're just
+anchors whose `type` is `"geo"`, so rendering (`attachModel`) is unchanged.
+
+```tsx
+// Switch to geo tracking, wait until localized with good accuracy, then drop an anchor.
+<ExpoArView ref={ref} style={{ flex: 1 }} trackingMode="geo"
+  onGeoStateChange={(e) => {
+    const { state, pose } = e.nativeEvent;
+    // Gate on accuracy, not just "localized" — a localized session can still be metres off.
+    if (state === 'localized' && pose && pose.horizontalAccuracy <= 1.5 && pose.headingAccuracy <= 15) {
+      // good enough to place
+    }
+  }}
+/>;
+
+// Coverage first (capability ≠ coverage), then place at the device's current location.
+if ((await ref.current?.checkVpsAvailability?.(lat, lng)) === 'available') {
+  const here = await ref.current?.getGeospatialPose?.();
+  if (here) await ref.current?.addGeoAnchor?.({ latitude: here.latitude, longitude: here.longitude, altitude: here.altitude, heading: 0 });
+}
+```
+
+### Build & auth
+
+Enable the extension in the config plugin and prebuild:
+
+```json
+{ "plugins": [["@stewmore/expo-ar", { "geospatial": true, "arcoreApiKey": "YOUR_ARCORE_API_KEY" }]] }
+```
+
+- **iOS** uses pure ARKit + Core Location — no extra dependency and no cloud credentials. The
+  plugin adds `NSLocationWhenInUseUsageDescription`. Apple's VPS covers a limited set of cities.
+- **Android** uses ARCore's Geospatial API, which **requires a Google Cloud project with the
+  ARCore API enabled**. The plugin adds `ACCESS_FINE_LOCATION` and injects your `arcoreApiKey` as
+  the `com.google.android.ar.API_KEY` meta-data. Coverage follows Google Street View. The device
+  also needs a magnetometer.
+- **Keyless auth** (server-signed tokens) is the more secure, production-recommended path on
+  Android; it requires standing up a token-signing endpoint and is **not wired by default** here —
+  the API-key path is provided for getting started.
+
+### Gotchas
+
+- **Gate on accuracy, not just "localized."** Hold until `horizontalAccuracy` / `headingAccuracy`
+  are within thresholds (the example uses ~1.5 m / 15°) and show an "improving accuracy…" state.
+- **Coverage is the gating reality.** Always `checkVpsAvailability` first; fall back to local world
+  anchors where VPS is absent.
+- **Outdoors, daylight, calibrate the compass.** VPS localizes from imagery + magnetometer; indoors
+  or in poor light it may never localize. Prompt the user to pan across buildings.
+- **Pose-accuracy asymmetry.** Android reports exact meter/degree accuracies from
+  `cameraGeospatialPose`; iOS derives lat/long from ARKit's `getGeoLocation(forPoint:)` and maps the
+  coarse `ARGeoTrackingStatus.accuracy` to representative values — treat iOS accuracy as approximate.
+  `heading` on `addGeoAnchor` is applied on Android only (ARKit `ARGeoAnchor` has no heading).
+- **Test on a physical device, outdoors.** Geo localization can't be reproduced in a simulator/emulator.
 
 ## Development
 
@@ -175,7 +249,7 @@ npm run lint       # eslint
 npm test           # jest
 ```
 
-The [`example/`](./example) app is the development harness — two worked features (measurement with object-pinned tape labels, and tap-to-place) composed on the same core. See [`example/README.md`](./example/README.md) for how to build and run the demo. Run it as a development build on a **physical device** — AR does not work in a simulator/emulator.
+The [`example/`](./example) app is the development harness — three worked features (measurement with object-pinned tape labels, tap-to-place, and geospatial/VPS anchoring) composed on the same core. See [`example/README.md`](./example/README.md) for how to build and run the demo. Run it as a development build on a **physical device** — AR does not work in a simulator/emulator.
 
 ### Releasing
 
