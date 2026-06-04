@@ -54,7 +54,11 @@ describe('useArSession (hook wiring)', () => {
     act(() => {
       result.current.handlers.onReady({
         nativeEvent: {
-          capabilities: { arSupported: true, depthOrLidarAvailable: true, geoTrackingSupported: true },
+          capabilities: {
+            arSupported: true,
+            depthOrLidarAvailable: true,
+            geoTrackingSupported: true,
+          },
         },
       });
       result.current.handlers.onAnchorsChange({

@@ -4,12 +4,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
+import { DetectionHUD } from './features/DetectionHUD';
 import { GeoHUD } from './features/GeoHUD';
 import { MeasureHUD } from './features/MeasureHUD';
 import { MeasurementLabels } from './features/MeasurementLabels';
 import { ModeSwitch, type DemoMode } from './features/ModeSwitch';
 import { PlacementHUD } from './features/PlacementHUD';
 import { type MeasureMode, type Unit } from './features/measurement';
+import { useArDetect } from './features/useArDetect';
 import { useArGeo } from './features/useArGeo';
 import { useArMeasure } from './features/useArMeasure';
 import { useArPlacement } from './features/useArPlacement';
@@ -53,7 +55,15 @@ function ArRoot() {
 
   return (
     <View style={styles.container}>
-      {mode === 'measure' ? <MeasureDemo /> : mode === 'place' ? <PlacementDemo /> : <GeoDemo />}
+      {mode === 'measure' ? (
+        <MeasureDemo />
+      ) : mode === 'place' ? (
+        <PlacementDemo />
+      ) : mode === 'geo' ? (
+        <GeoDemo />
+      ) : (
+        <DetectDemo />
+      )}
       <ModeSwitch mode={mode} onChange={setMode} />
     </View>
   );
@@ -183,6 +193,41 @@ function GeoDemo() {
         vps={vps}
         onDrop={() => void g.dropAnchorHere()}
         onClear={g.clear}
+      />
+    </View>
+  );
+}
+
+// CV-fusion demo: on-device detection runs natively on the AR session's own frames (the registered
+// "objects" processor — Vision on iOS, ML Kit on Android, see example/modules/ar-detectors), and the
+// module emits boxes + same-frame world transforms via onDetections. Skia draws the boxes; "Place"
+// anchors a model on the top detection (detect-then-place) and "Measure" reads its width
+// (detect-then-measure) — both reusing the SAME core (addAnchorAtWorld/raycast/anchors).
+function DetectDemo() {
+  const d = useArDetect();
+
+  return (
+    <View style={StyleSheet.absoluteFill}>
+      <ExpoArView
+        ref={d.ref}
+        style={StyleSheet.absoluteFill}
+        planeDetection="both"
+        depthEnabled
+        detectionEnabled
+        detectionModel="objects"
+        minConfidence={0.5}
+        detectionFps={10}
+        {...d.handlers}
+      />
+      <DetectionHUD
+        ready={d.ready}
+        detections={d.detections}
+        detector={d.detector}
+        size={d.size}
+        lastMeasure={d.lastMeasure}
+        onPlace={() => void d.placeTop()}
+        onMeasure={() => void d.measureTop()}
+        onClear={d.clear}
       />
     </View>
   );

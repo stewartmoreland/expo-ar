@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["ArDetectorsModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.ardetectors.ArDetectorsModule"]
+  }
+}

@@ -14,6 +14,7 @@ open class ExpoArView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   let onAnchorsChange = EventDispatcher()
   let onProjection = EventDispatcher()
   let onGeoStateChange = EventDispatcher()
+  let onDetections = EventDispatcher()
   let onError = EventDispatcher()
 
   public let sceneView = ARSCNView(frame: .zero)
@@ -35,6 +36,15 @@ open class ExpoArView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   // non-measurement screens pay nothing. lastProjectionEmit is in ARFrame.timestamp units.
   private var emitProjections = false
   private var lastProjectionEmit: TimeInterval = 0
+  // CV-fusion extension: per-frame detection runs the registered processor named `detectionModel`.
+  // Off by default (zero cost). The model is also skipped while a previous run is in flight, and
+  // throttled to `detectionFps`. lastDetectionRun is in ARFrame.timestamp units.
+  private var detectionEnabled = false
+  private var detectionModel = ""
+  private var minConfidence = 0.5
+  private var detectionFps = 10.0
+  private var detectionInFlight = false
+  private var lastDetectionRun: TimeInterval = 0
   private var didReportReady = false
   // True only while the session is intentionally paused by JS, so foregrounding
   // doesn't silently resume a session the app asked to stop.
@@ -129,6 +139,12 @@ open class ExpoArView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   func setEmitProjections(_ on: Bool) {
     emitProjections = on
   }
+
+  // CV-fusion extension props. None restart the session — detection layers on the frame hook.
+  func setDetectionEnabled(_ on: Bool) { detectionEnabled = on }
+  func setDetectionModel(_ name: String) { detectionModel = name }
+  func setMinConfidence(_ value: Double) { minConfidence = value }
+  func setDetectionFps(_ value: Double) { detectionFps = value }
 
   // Geospatial extension: switch the session configuration. Restarting is required — a
   // session runs exactly one configuration at a time. No-op if the mode is unchanged.
@@ -241,6 +257,7 @@ open class ExpoArView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
   // that track in 3D. Throttled to ~30fps; skipped while not tracking or with <2 anchors.
   public func session(_ session: ARSession, didUpdate frame: ARFrame) {
     emitGeoIfNeeded(frame)
+    runDetectionIfNeeded(frame)
     guard emitProjections, anchorsById.count >= 2 else { return }
     guard case .normal = frame.camera.trackingState else { return }
     if frame.timestamp - lastProjectionEmit < 1.0 / 30.0 { return }
@@ -257,6 +274,34 @@ open class ExpoArView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
 
   private func orderedAnchorIds() -> [String] {
     anchorOrder.filter { anchorsById[$0] != nil }
+  }
+
+  // MARK: - CV-fusion detection (opt-in via detectionEnabled + a registered detectionModel)
+  // Runs the registered processor on the throttled cadence, skipping while a previous inference is
+  // in flight (so we never block the delegate thread or pile up requests). The processor does the
+  // inference + sensor→view box mapping + same-frame raycast; we only own the scaffold and emit.
+  private func runDetectionIfNeeded(_ frame: ARFrame) {
+    guard detectionEnabled, !detectionInFlight,
+      case .normal = frame.camera.trackingState,
+      let processor = ExpoArDetectorRegistry.processor(for: detectionModel)
+    else { return }
+    if frame.timestamp - lastDetectionRun < 1.0 / max(detectionFps, 1) { return }
+    lastDetectionRun = frame.timestamp
+    detectionInFlight = true
+
+    let viewport = bounds.size
+    processor.process(
+      frame: frame, viewportSize: viewport, minConfidence: minConfidence,
+      raycast: { [weak self] point in
+        self?.raycast(at: point) ?? ["worldTransform": NSNull(), "target": NSNull()]
+      }
+    ) { [weak self] detections in
+      guard let self = self else { return }
+      DispatchQueue.main.async {
+        self.onDetections(["detections": detections])
+        self.detectionInFlight = false
+      }
+    }
   }
 
   // ARSCNView.projectPoint returns view-space points (top-left origin) — the same space
@@ -314,13 +359,35 @@ open class ExpoArView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
       onError(["code": "no_hit", "message": "No surface found at point."])
       return nil
     }
-    let anchor = ARAnchor(transform: result.worldTransform)
+    return ["id": registerAnchor(ARAnchor(transform: result.worldTransform))]
+  }
+
+  /// CV-fusion extension: anchor directly at a world transform the detector already computed —
+  /// a sibling of addAnchor(at:) that skips the raycast. `m` is the 16-float column-major transform.
+  func addAnchorAtWorld(_ m: [Double]) -> [String: Any]? {
+    guard m.count == 16 else {
+      onError(["code": "bad_transform", "message": "Expected a 16-element column-major transform."])
+      return nil
+    }
+    let f = m.map { Float($0) }
+    let transform = simd_float4x4(
+      simd_float4(f[0], f[1], f[2], f[3]),
+      simd_float4(f[4], f[5], f[6], f[7]),
+      simd_float4(f[8], f[9], f[10], f[11]),
+      simd_float4(f[12], f[13], f[14], f[15]))
+    return ["id": registerAnchor(ARAnchor(transform: transform))]
+  }
+
+  // Shared anchor-registration tail (add to session + bookkeeping + emit) used by addAnchor,
+  // addAnchorAtWorld, and addGeoAnchor so all three stay in sync.
+  @discardableResult
+  private func registerAnchor(_ anchor: ARAnchor) -> String {
     sceneView.session.add(anchor: anchor)
     let id = anchor.identifier.uuidString
     anchorsById[id] = anchor
     anchorOrder.append(id)
     emitAnchors()
-    return ["id": id]
+    return id
   }
 
   func removeAnchor(id: String) {
@@ -399,12 +466,7 @@ open class ExpoArView: ExpoView, ARSCNViewDelegate, ARSessionDelegate {
     let coord = CLLocationCoordinate2D(latitude: lat, longitude: lng)
     let anchor: ARGeoAnchor =
       alt != nil ? ARGeoAnchor(coordinate: coord, altitude: alt!) : ARGeoAnchor(coordinate: coord)
-    sceneView.session.add(anchor: anchor)
-    let id = anchor.identifier.uuidString
-    anchorsById[id] = anchor
-    anchorOrder.append(id)
-    emitAnchors()
-    return ["id": id]
+    return ["id": registerAnchor(anchor)]
   }
 
   /// One-shot current device geospatial pose, or nil if not yet localizable.

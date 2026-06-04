@@ -2,7 +2,7 @@ import { NativeModule, registerWebModule } from 'expo';
 import * as React from 'react';
 import { View } from 'react-native';
 
-import type { ArViewHandle, Capabilities, ExpoArViewProps } from './ExpoAr.types';
+import type { ArViewHandle, Capabilities, DetectorInfo, ExpoArViewProps } from './ExpoAr.types';
 
 type ExpoArModuleEvents = Record<never, never>;
 
@@ -12,6 +12,11 @@ type ExpoArModuleEvents = Record<never, never>;
 class ExpoArModule extends NativeModule<ExpoArModuleEvents> {
   getCapabilities(): Capabilities {
     return { arSupported: false, depthOrLidarAvailable: false, geoTrackingSupported: false };
+  }
+
+  // No CV on web — nothing is ever registered.
+  getDetectorInfo(_model: string): DetectorInfo {
+    return { available: false, label: '' };
   }
 }
 

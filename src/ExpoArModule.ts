@@ -1,12 +1,13 @@
 import { NativeModule, requireNativeModule, requireNativeView } from 'expo';
 import * as React from 'react';
 
-import type { ArViewHandle, Capabilities, ExpoArViewProps } from './ExpoAr.types';
+import type { ArViewHandle, Capabilities, DetectorInfo, ExpoArViewProps } from './ExpoAr.types';
 
 type ExpoArModuleEvents = Record<never, never>;
 
 declare class ExpoArModule extends NativeModule<ExpoArModuleEvents> {
   getCapabilities(): Capabilities;
+  getDetectorInfo(model: string): DetectorInfo;
 }
 
 const NativeModuleInstance = requireNativeModule<ExpoArModule>('ExpoAr');

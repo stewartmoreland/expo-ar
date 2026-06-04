@@ -39,6 +39,7 @@ import java.io.ByteArrayOutputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
+import kotlin.math.sqrt
 
 // Generic ARCore AR view. Owns the camera + world-anchored 3D content; React Native
 // draws its 2D HUD on top. `open` + exposed sceneView/anchorsById so feature code
@@ -57,6 +58,7 @@ open class ExpoArView(context: Context, appContext: AppContext) :
   private val onAnchorsChange by EventDispatcher()
   private val onProjection by EventDispatcher()
   private val onGeoStateChange by EventDispatcher()
+  private val onDetections by EventDispatcher()
   private val onError by EventDispatcher()
 
   val sceneView = ARSceneView(context)
@@ -83,6 +85,15 @@ open class ExpoArView(context: Context, appContext: AppContext) :
   // Geospatial extension: "world" (default) | "geo". lastGeoEmit throttles onGeoStateChange.
   private var trackingMode = "world"
   private var lastGeoEmit = 0L
+  // CV-fusion extension: per-frame detection runs the registered processor named `detectionModel`.
+  // Off by default (zero cost). Skipped while a previous run is in flight, and throttled to
+  // `detectionFps`. lastDetectionRun is in Frame.timestamp nanos.
+  private var detectionEnabled = false
+  private var detectionModel = ""
+  private var minConfidence = 0.5
+  private var detectionFps = 10.0
+  private var detectionInFlight = false
+  private var lastDetectionRun = 0L
 
   // ---- Lifecycle plumbing (see class doc) ----
   private val lifecycleRegistry = LifecycleRegistry(this)
@@ -200,6 +211,12 @@ open class ExpoArView(context: Context, appContext: AppContext) :
     emitProjections = on
   }
 
+  // CV-fusion extension props. None reconfigure the session — detection layers on the frame hook.
+  fun setDetectionEnabled(on: Boolean) { detectionEnabled = on }
+  fun setDetectionModel(name: String) { detectionModel = name }
+  fun setMinConfidence(value: Double) { minConfidence = value }
+  fun setDetectionFps(value: Double) { detectionFps = value }
+
   // Geospatial extension: switch the session configuration (reconfigured in place). No-op if
   // the mode is unchanged.
   fun setTrackingMode(mode: String) {
@@ -252,6 +269,33 @@ open class ExpoArView(context: Context, appContext: AppContext) :
     }
     emitProjectionsIfNeeded(frame)
     emitGeoIfNeeded(frame)
+    runDetectionIfNeeded(frame)
+  }
+
+  // MARK: - CV-fusion detection (opt-in via detectionEnabled + a registered detectionModel)
+  // Runs the registered processor on the throttled cadence, skipping while a previous inference is
+  // in flight (so we never block the session-update thread or pile up requests). The processor owns
+  // the inference, the IMAGE→VIEW box mapping, the same-frame raycast, and closing the camera image;
+  // we own only the scaffold and the emit.
+  private fun runDetectionIfNeeded(frame: Frame) {
+    if (!detectionEnabled || detectionInFlight) return
+    if (frame.camera.trackingState != TrackingState.TRACKING) return
+    val processor = ExpoArDetectorRegistry.processor(detectionModel) ?: return
+    val now = frame.timestamp
+    val interval = (1_000_000_000.0 / maxOf(detectionFps, 1.0)).toLong()
+    if (now - lastDetectionRun < interval) return
+    lastDetectionRun = now
+    detectionInFlight = true
+    // The processor speaks view-space PIXELS (ARCore Coordinates2d.VIEW); our raycast(x,y) speaks dp,
+    // so bridge px→dp here. The processor normalizes its bbox against viewWidth/Height.
+    val density = resources.displayMetrics.density
+    processor.process(
+      frame, sceneView.width, sceneView.height, minConfidence,
+      { px, py -> raycast(px / density, py / density) }
+    ) { detections ->
+      onDetections(mapOf("detections" to detections))
+      detectionInFlight = false
+    }
   }
 
   // MARK: - Per-frame projection (opt-in via emitProjections)
@@ -389,11 +433,7 @@ open class ExpoArView(context: Context, appContext: AppContext) :
     val quaternion = headingToQuaternion(heading)
     val alt = altitude ?: earth.cameraGeospatialPose.altitude
     val anchor = earth.createAnchor(latitude, longitude, alt, quaternion)
-    val id = (++anchorCounter).toString()
-    anchorsById[id] = anchor
-    geoAnchorIds.add(id)
-    emitAnchors()
-    return mapOf("id" to id)
+    return mapOf("id" to registerAnchor(anchor, geo = true))
   }
 
   /// Current device geospatial pose, or null when not localized.
@@ -457,11 +497,61 @@ open class ExpoArView(context: Context, appContext: AppContext) :
       val t = it.trackable
       t is Plane || t is Point || t is DepthPoint
     } ?: return err("no_hit")
-    val anchor = hit.createAnchor()
+    return mapOf("id" to registerAnchor(hit.createAnchor()))
+  }
+
+  /// CV-fusion extension: anchor directly at a world transform the detector already computed — a
+  /// sibling of addAnchor(x,y) that skips the hit-test. `transform` is the 16-float column-major
+  /// matrix; translation comes from the last column, rotation from the upper-left 3x3.
+  fun addAnchorAtWorld(transform: List<Double>): Map<String, Any?>? {
+    if (transform.size < 16) {
+      onError(
+        mapOf("code" to "bad_transform", "message" to "Expected a 16-element column-major transform.")
+      )
+      return null
+    }
+    val session = sceneView.session ?: return err("no_session")
+    val m = FloatArray(16) { transform[it].toFloat() }
+    val pose = Pose(floatArrayOf(m[12], m[13], m[14]), rotationQuaternion(m))
+    return mapOf("id" to registerAnchor(session.createAnchor(pose)))
+  }
+
+  // Shared anchor-registration tail (id + bookkeeping + emit) used by addAnchor, addAnchorAtWorld,
+  // and addGeoAnchor so all three stay in sync. `geo` tags the anchor type "geo" in serialize().
+  private fun registerAnchor(anchor: Anchor, geo: Boolean = false): String {
     val id = (++anchorCounter).toString()
     anchorsById[id] = anchor
+    if (geo) geoAnchorIds.add(id)
     emitAnchors()
-    return mapOf("id" to id)
+    return id
+  }
+
+  // Rotation matrix (upper-left 3x3 of a column-major 4x4, m[col*4+row]) → quaternion [x,y,z,w],
+  // the layout ARCore's Pose expects. Standard trace-based extraction; assumes a rigid (no-scale)
+  // transform, which anchor poses are.
+  private fun rotationQuaternion(m: FloatArray): FloatArray {
+    val r00 = m[0]; val r10 = m[1]; val r20 = m[2]
+    val r01 = m[4]; val r11 = m[5]; val r21 = m[6]
+    val r02 = m[8]; val r12 = m[9]; val r22 = m[10]
+    val trace = r00 + r11 + r22
+    return when {
+      trace > 0f -> {
+        val s = sqrt(trace + 1f) * 2f // s = 4*qw
+        floatArrayOf((r21 - r12) / s, (r02 - r20) / s, (r10 - r01) / s, 0.25f * s)
+      }
+      r00 > r11 && r00 > r22 -> {
+        val s = sqrt(1f + r00 - r11 - r22) * 2f // s = 4*qx
+        floatArrayOf(0.25f * s, (r01 + r10) / s, (r02 + r20) / s, (r21 - r12) / s)
+      }
+      r11 > r22 -> {
+        val s = sqrt(1f + r11 - r00 - r22) * 2f // s = 4*qy
+        floatArrayOf((r01 + r10) / s, 0.25f * s, (r12 + r21) / s, (r02 - r20) / s)
+      }
+      else -> {
+        val s = sqrt(1f + r22 - r00 - r11) * 2f // s = 4*qz
+        floatArrayOf((r02 + r20) / s, (r12 + r21) / s, 0.25f * s, (r10 - r01) / s)
+      }
+    }
   }
 
   fun removeAnchor(id: String) {
