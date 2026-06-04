@@ -5,6 +5,7 @@ on:
     branches: [main]
   push:
     branches: [main]
+  workflow_dispatch: # manual "Run release" button — covers pushes that don't fire the push trigger
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -33,8 +34,8 @@ jobs:
   release:
     name: Release & publish to npm
     needs: verify
-    # Only on a merge/push to main — never on PRs. The verify gate must pass first.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # On a merge/push to main, or a manual dispatch — never on PRs. The verify gate must pass first.
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write # push the release commit + tag, create the GitHub release
