@@ -1,11 +1,9 @@
-# expo-ar
+# @stewmore/expo-ar
 
 > An open-source Expo native module that bridges **Apple ARKit** (iOS) and **Google ARCore** (Android) into a single React Native augmented-reality view.
 
 [![CI](https://github.com/stewartmoreland/expo-ar/actions/workflows/ci.yml/badge.svg)](https://github.com/stewartmoreland/expo-ar/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
-
-> **Status: early-stage / foundation.** The module scaffold is in place; the native ARKit and ARCore implementations are still being built. The API described under [Planned API](#planned-api) is the **target contract** — treat anything below as in progress until it lands.
 
 ## Why this exists
 
@@ -15,14 +13,14 @@ It is intentionally **use-case agnostic**. The module exposes the generic AR pri
 
 ## Requirements
 
-- **Expo SDK 50+** with the Expo Modules API.
+- **Expo SDK 56** with the Expo Modules API.
 - A **development build** — AR requires native code, so **Expo Go cannot run this**. Use EAS Build or a local dev build.
 - **Physical devices.** Neither ARKit nor ARCore runs in the iOS Simulator or Android emulator; you need real hardware with motion sensors.
 
 ## Installation
 
 ```sh
-npx expo install expo-ar
+npx expo install @stewmore/expo-ar
 ```
 
 Then add the **config plugin** to your `app.json` (or `app.config.js`) and run a
@@ -34,7 +32,7 @@ permission, and the ARKit/ARCore manifest entries.
   "expo": {
     "plugins": [
       [
-        "expo-ar",
+        "@stewmore/expo-ar",
         {
           "cameraPermission": "Allow $(PRODUCT_NAME) to use the camera for AR.",
           "arRequired": false
@@ -56,6 +54,60 @@ Because AR requires native code, you must use a **development build** — `expo 
 npx expo prebuild
 ```
 
+## Quick start
+
+Probe support **before** mounting the view, then render `<ExpoArView />` and drive it
+through its ref. Don't act on raycasts until tracking reaches `normal` —
+raycasts during `initializing`/`limited` return garbage.
+
+```tsx
+import { useRef, useState } from 'react';
+import { View } from 'react-native';
+import {
+  ExpoArView,
+  getCapabilities,
+  type ArViewHandle,
+  type Capabilities,
+  type TapEvent,
+} from '@stewmore/expo-ar';
+
+export function ArScreen() {
+  const ref = useRef<ArViewHandle>(null);
+  const [caps] = useState<Capabilities>(() => getCapabilities());
+
+  // No ARKit/ARCore here (and always on web) — render your non-AR fallback instead.
+  if (!caps.arSupported) {
+    return <View /* expo-camera fallback */ />;
+  }
+
+  return (
+    <ExpoArView
+      ref={ref}
+      style={{ flex: 1 }}
+      planeDetection="both"
+      depthEnabled
+      onReady={(e) => console.log('AR ready', e.nativeEvent.capabilities)}
+      onTrackingStateChange={(e) => console.log('tracking', e.nativeEvent.state)}
+      // A tap raycasts and drops a persistent anchor at the hit point.
+      onTap={async (e: TapEvent) => {
+        const anchor = await ref.current?.addAnchor(e.nativeEvent.x, e.nativeEvent.y);
+        if (anchor) console.log('placed', anchor.id);
+      }}
+      onError={(e) => console.warn(e.nativeEvent.code, e.nativeEvent.message)}
+    />
+  );
+}
+```
+
+> **The AR view owns the camera.** An ARKit/ARCore session takes **exclusive** control of
+> the camera — never stack the AR view over `expo-camera`, or you get a black frame. Only
+> one AR session runs app-wide; pause it on blur and resume on focus.
+
+The barrel also re-exports a few conveniences built on the same contract: the
+`useArSession` reducer/hook (`useArSession`, `arSessionReducer`, `initialArSessionState`)
+for managing tracking/anchor state, and matrix helpers from `./transform` for working with
+the 16-number column-major poses.
+
 ## Capability tiers
 
 Detect support at runtime and branch; never assume LiDAR/Depth is present.
@@ -66,9 +118,9 @@ Detect support at runtime and branch; never assume LiDAR/Depth is present.
 | **Good** | ARKit world tracking, no LiDAR       | ARCore, no depth                 | Tracking + planes; accurate on well-lit, textured surfaces and detected planes |
 | **None** | No ARKit                             | Not an ARCore-supported device   | No AR — fall back to `expo-camera` |
 
-## Planned API
+## API
 
-> **Target API — in progress.** Names and shapes are the contract being built toward; both Swift and Kotlin emit byte-for-byte identical event names and payload keys.
+Both Swift and Kotlin emit byte-for-byte identical event names and payload keys, and accept identical prop/function signatures. The canonical contract lives in [`src/ExpoAr.types.ts`](./src/ExpoAr.types.ts).
 
 **Module function (no view):**
 
@@ -94,8 +146,10 @@ Detect support at runtime and branch; never assume LiDAR/Depth is present.
 | `removeAnchor(id)`  | Remove an anchor |
 | `listAnchors()`     | Current anchors |
 | `pause()` / `resume()` / `reset()` | Session lifecycle control (`reset` clears anchors and restarts tracking) |
-| `snapshot()`        | `base64` image |
+| `snapshot()`        | `base64` JPEG of the rendered scene |
 | `worldToScreen(transform)` | `{ id, x, y, inFront } \| null` — project a 3D point to screen coordinates (the inverse of `raycast`) |
+| `attachModel(anchorId, modelUri)` | Render a model at an anchor — a USDZ/SCN (iOS) or glTF/GLB (Android) URL, or the built-in `"builtin:cube"`. Additive rendering primitive used by tap-to-place |
+| `detachModel(anchorId)` | Remove the model attached to an anchor (leaves the anchor) |
 
 **Events (native → JS):**
 
@@ -122,6 +176,24 @@ npm test           # jest
 ```
 
 The [`example/`](./example) app is the development harness — two worked features (measurement with object-pinned tape labels, and tap-to-place) composed on the same core. See [`example/README.md`](./example/README.md) for how to build and run the demo. Run it as a development build on a **physical device** — AR does not work in a simulator/emulator.
+
+### Releasing
+
+Releases are automated with [release-it](https://github.com/release-it/release-it). When a
+PR is merged to `main`, the `release` job in [`ci.yml`](./.github/workflows/ci.yml) (after
+the build/lint/test gate) runs `release-it --ci`, which:
+
+- picks the next version from the merged [Conventional Commits](https://www.conventionalcommits.org/)
+  (`fix:` → patch, `feat:` → minor, `feat!:`/`BREAKING CHANGE` → major) and updates
+  `CHANGELOG.md`;
+- syncs that version into the native specs (`ios/ExpoAr.podspec`, `android/build.gradle`,
+  `plugin/src/index.ts`) via [`sync-version.js`](./internal/module_scripts/sync-version.js);
+- commits + tags `vX.Y.Z`, creates the GitHub release, and publishes to npm.
+
+Use Conventional Commit messages (or squash-merge PRs with a conventional title) so the bump
+is correct. **Setup:** add an automation-scoped `NPM_TOKEN` as a repository secret; the
+built-in `GITHUB_TOKEN` handles the tag, push, and GitHub release. To preview locally:
+`npx release-it --ci --dry-run`.
 
 ## Contributing
 

@@ -25,3 +25,34 @@ jobs:
       - run: npm run build plugin # compile the config plugin
       - run: npm run lint
       - run: npm test
+
+  release:
+    name: Release & publish to npm
+    needs: verify
+    # Only on a merge/push to main — never on PRs. The verify gate must pass first.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the release commit + tag, create the GitHub release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main # check out the branch (not a detached SHA) so release-it can commit + push back
+          fetch-depth: 0 # release-it needs full history + tags to compute the bump
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          registry-url: https://registry.npmjs.org # writes the NPM_TOKEN auth line to .npmrc
+      - run: npm ci
+      - run: npm run build # build/ ships in the package (see "files" in package.json)
+      - run: npm run build plugin # plugin/build ships too
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: release-it (bump, changelog, tag, GitHub release, npm publish)
+        run: npx release-it --ci
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
