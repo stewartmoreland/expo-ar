@@ -105,6 +105,12 @@ open class ExpoArView(context: Context, appContext: AppContext) :
         onTap(mapOf("x" to e.x / density, "y" to e.y / density))
       }
     }
+    // Session-level failures (install/update declined, camera unavailable, ARCore error)
+    // surface to JS as onError — same code/keys as iOS session(_:didFailWithError:), so a
+    // consumer can show the expo-camera fallback on either platform with identical handling.
+    sceneView.onSessionFailed = { error ->
+      onError(mapOf("code" to "session_failed", "message" to (error.message ?: error.toString())))
+    }
   }
 
   override fun onAttachedToWindow() {
