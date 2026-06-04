@@ -58,3 +58,5 @@ yarn-error.log
 
 # Expo
 .expo/*
+
+**/.cache

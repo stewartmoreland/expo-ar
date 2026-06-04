@@ -53,7 +53,7 @@ Read the references in this order; the contract is the glue, the platform files 
 | **iOS core** | Generic ARKit module/view: session, lifecycle, tracking, raycast, anchors, planes, LiDAR mesh, frame buffer | `references/ios-arkit.md` |
 | **Android core** | Generic ARCore module/view: session + install flow, config, depth, hit-test, anchors, planes, frame image | `references/android-arcore.md` |
 | **Build config** | Local-module scaffold, config plugin, `app.json`, prebuild | `references/config-plugin.md` |
-| **Examples** | Measurement (`examples/measurement.md`) · tap-to-place objects (`examples/object-placement.md`) · geospatial/VPS anchoring (`examples/geospatial.md`, a core-level extension) | `references/examples/` |
+| **Examples** | Measurement (`examples/measurement.md`) · tap-to-place objects (`examples/object-placement.md`) · geospatial/VPS anchoring (`examples/geospatial.md`, a core-level extension) · CV fusion (`examples/cv-fusion.md`, detect-then-place/measure) | `references/examples/` |
 
 Don't hold all five in your head at once. Lock the contract, implement the platform core(s), then compose the feature from an example.
 
@@ -129,4 +129,4 @@ Both ARKit and ARCore use a right-handed, Y-up world space measured in **meters*
 
 ---
 
-Once a blank tracking view, the raycast primitive, and anchors work end-to-end on a real device, compose the target feature from an example and layer the HUD. Natural next steps to offer: anchor persistence (ARWorldMap / ARCore Cloud Anchors), mesh occlusion, fusing on-device CV with raycasting for detect-then-place or detect-then-measure flows, and world-scale **geospatial/VPS anchoring** (place content at real lat/long) — see `references/examples/geospatial.md`, which is a core-level extension (it changes the session configuration and adds an auth/build setup) rather than a pure feature.
+Once a blank tracking view, the raycast primitive, and anchors work end-to-end on a real device, compose the target feature from an example and layer the HUD. Natural next steps to offer: anchor persistence (ARWorldMap / ARCore Cloud Anchors), mesh occlusion, fusing on-device CV with raycasting for detect-then-place or detect-then-measure flows (see `references/examples/cv-fusion.md`), and world-scale **geospatial/VPS anchoring** (place content at real lat/long) — see `references/examples/geospatial.md`, which is a core-level extension (it changes the session configuration and adds an auth/build setup) rather than a pure feature.
