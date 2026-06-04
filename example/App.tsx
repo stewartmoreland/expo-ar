@@ -1,8 +1,11 @@
 import { ExpoArView, getCapabilities, type Capabilities, type TapEvent } from 'expo-ar';
-import { useMemo, useState } from 'react';
-import { Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useMemo, useState } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 import { MeasureHUD } from './features/MeasureHUD';
+import { MeasurementLabels } from './features/MeasurementLabels';
+import { ModeSwitch, type DemoMode } from './features/ModeSwitch';
 import { PlacementHUD } from './features/PlacementHUD';
 import { type MeasureMode, type Unit } from './features/measurement';
 import { useArMeasure } from './features/useArMeasure';
@@ -22,63 +25,55 @@ export default function App() {
     }
   }, []);
 
-  if (!caps.arSupported) {
-    return (
-      <SafeAreaView style={styles.fallback}>
-        <Text style={styles.fallbackText}>
-          AR is not supported on this device. A real app would fall back to expo-camera here.
-        </Text>
-      </SafeAreaView>
-    );
-  }
-
-  return <ArRoot />;
+  return (
+    <SafeAreaProvider>
+      {caps.arSupported ? (
+        <ArRoot />
+      ) : (
+        <SafeAreaView style={styles.fallback}>
+          <Text style={styles.fallbackText}>
+            AR is not supported on this device. A real app would fall back to expo-camera here.
+          </Text>
+        </SafeAreaView>
+      )}
+    </SafeAreaProvider>
+  );
 }
-
-type DemoMode = 'measure' | 'place';
 
 // Owns the demo selector. Conditionally renders EXACTLY ONE demo (and thus exactly one
 // <ExpoArView> / one AR session) at a time — AR allows only one active session app-wide,
 // so switching unmounts the old view (releasing the camera) before mounting the new one.
+// The mode switch lives at the TOP; each demo's controls live at the BOTTOM, so chrome
+// never overlaps (see theme LAYOUT).
 function ArRoot() {
   const [mode, setMode] = useState<DemoMode>('measure');
 
   return (
     <View style={styles.container}>
       {mode === 'measure' ? <MeasureDemo /> : <PlacementDemo />}
-
-      {/* Segmented switcher persists across the demo swap and is the single source of mode. */}
-      <SafeAreaView style={styles.switcherWrap} pointerEvents="box-none">
-        <View style={styles.segment}>
-          <Pressable
-            style={[styles.segmentItem, mode === 'measure' && styles.segmentItemActive]}
-            onPress={() => setMode('measure')}>
-            <Text style={[styles.segmentTxt, mode === 'measure' && styles.segmentTxtActive]}>
-              Measure
-            </Text>
-          </Pressable>
-          <Pressable
-            style={[styles.segmentItem, mode === 'place' && styles.segmentItemActive]}
-            onPress={() => setMode('place')}>
-            <Text style={[styles.segmentTxt, mode === 'place' && styles.segmentTxtActive]}>
-              Place
-            </Text>
-          </Pressable>
-        </View>
-      </SafeAreaView>
+      <ModeSwitch mode={mode} onChange={setMode} />
     </View>
   );
 }
 
 const UNITS: Unit[] = ['m', 'cm', 'ft', 'in'];
 
-// Measurement demo: tap to drop points; distance/area derive from the core's anchors.
+// Measurement demo: tap to drop points; distance/area derive from the core's anchors, and
+// per-segment labels pin to the object via the opt-in projection stream (emitProjections).
 function MeasureDemo() {
   const m = useArMeasure();
   const [unit, setUnit] = useState<Unit>('m');
   const [measureMode, setMeasureMode] = useState<MeasureMode>('distance');
 
   const onTap = (e: { nativeEvent: TapEvent }) => m.addPointAt(e.nativeEvent.x, e.nativeEvent.y);
+  const onCycleUnit = useCallback(
+    () => setUnit((u) => UNITS[(UNITS.indexOf(u) + 1) % UNITS.length]),
+    []
+  );
+  const onToggleMode = useCallback(
+    () => setMeasureMode((x) => (x === 'distance' ? 'area' : 'distance')),
+    []
+  );
 
   return (
     <View style={StyleSheet.absoluteFill}>
@@ -88,20 +83,29 @@ function MeasureDemo() {
         planeDetection="both"
         depthEnabled
         debug
+        emitProjections
         onTap={onTap}
         {...m.handlers}
+      />
+      <MeasurementLabels
+        anchors={m.anchors}
+        segments={m.segments}
+        projected={m.projected}
+        unit={unit}
       />
       <MeasureHUD
         mode={measureMode}
         unit={unit}
         ready={m.ready}
+        count={m.points.length}
         distance={m.distance}
+        perimeter={m.perimeter}
         area={m.area}
         onAdd={m.addPointAtCenter}
         onUndo={m.undo}
         onClear={m.clear}
-        onCycleUnit={() => setUnit((u) => UNITS[(UNITS.indexOf(u) + 1) % UNITS.length])}
-        onToggleMode={() => setMeasureMode((x) => (x === 'distance' ? 'area' : 'distance'))}
+        onCycleUnit={onCycleUnit}
+        onToggleMode={onToggleMode}
       />
     </View>
   );
@@ -145,18 +149,4 @@ const styles = StyleSheet.create({
     backgroundColor: '#111',
   },
   fallbackText: { color: '#fff', fontSize: 16, textAlign: 'center' },
-  switcherWrap: { position: 'absolute', left: 0, right: 0, bottom: 0, alignItems: 'center' },
-  segment: {
-    flexDirection: 'row',
-    marginBottom: 8,
-    padding: 4,
-    borderRadius: 999,
-    backgroundColor: 'rgba(17,24,39,0.7)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
-  },
-  segmentItem: { paddingHorizontal: 22, paddingVertical: 8, borderRadius: 999 },
-  segmentItemActive: { backgroundColor: 'rgba(255,255,255,0.92)' },
-  segmentTxt: { color: '#E5E7EB', fontWeight: '600' },
-  segmentTxtActive: { color: '#000' },
 });

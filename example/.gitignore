@@ -18,6 +18,12 @@ expo-env.d.ts
 *.key
 *.mobileprovision
 
+# Local dev-client build artifacts (e.g. build-*-dev.apk / .ips) — don't commit binaries
+*.apk
+*.aab
+*.ipa
+*.ips
+
 # Metro
 .metro-health-check*
 

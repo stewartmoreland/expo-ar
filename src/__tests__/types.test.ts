@@ -3,6 +3,8 @@ import {
   AnchorsEvent,
   Capabilities,
   ErrorEvent,
+  ProjectedPoint,
+  ProjectionEvent,
   RaycastResult,
   ReadyEvent,
   TapEvent,
@@ -79,6 +81,24 @@ describe('event payload schemas (round-trip)', () => {
   it('ErrorEvent round-trips', () => {
     const payload = { code: 'E_TRACKING_LOST', message: 'lost tracking' };
     expect(ErrorEvent.parse(payload)).toEqual(payload);
+  });
+
+  it('ProjectedPoint round-trips and rejects a renamed key', () => {
+    const payload = { id: 'a1', x: 120.5, y: 240, inFront: true };
+    expect(ProjectedPoint.parse(payload)).toEqual(payload);
+    // `inFront` is the parity tripwire — Swift/Kotlin must emit this exact key.
+    expect(() => ProjectedPoint.parse({ id: 'a1', x: 1, y: 2, infront: true })).toThrow();
+  });
+
+  it('ProjectionEvent round-trips a list of projected points', () => {
+    const payload = {
+      points: [
+        { id: 'a1', x: 10, y: 20, inFront: true },
+        { id: 'a2', x: 30, y: 40, inFront: false },
+      ],
+    };
+    expect(ProjectionEvent.parse(payload)).toEqual(payload);
+    expect(ProjectionEvent.parse({ points: [] })).toEqual({ points: [] });
   });
 });
 

@@ -41,6 +41,18 @@ export const RaycastResult = z.object({
 });
 export type RaycastResult = z.infer<typeof RaycastResult>;
 
+// A world point projected to the screen. x/y are RN logical points/dp — the SAME
+// coordinate space as onTap and the raycast/addAnchor inputs, so a JS overlay placed
+// at (x, y) lands on the natively-rendered geometry on both platforms. `inFront` is
+// false when the point is behind the camera (hide any label that depends on it).
+export const ProjectedPoint = z.object({
+  id: z.string(),
+  x: z.number(),
+  y: z.number(),
+  inFront: z.boolean(),
+});
+export type ProjectedPoint = z.infer<typeof ProjectedPoint>;
+
 // ---- Event payloads (native -> JS) ----
 export const ReadyEvent = z.object({ capabilities: Capabilities });
 export type ReadyEvent = z.infer<typeof ReadyEvent>;
@@ -57,6 +69,13 @@ export type AnchorsEvent = z.infer<typeof AnchorsEvent>;
 export const ErrorEvent = z.object({ code: z.string(), message: z.string() });
 export type ErrorEvent = z.infer<typeof ErrorEvent>;
 
+// Per-frame screen positions of the current anchors, emitted (throttled) only while the
+// opt-in `emitProjections` prop is set. Lets a 2D HUD pin labels to world-anchored points
+// that track as the device moves. High-frequency — consumers should read nativeEvent
+// directly rather than Zod-parsing on every frame (see useArMeasure).
+export const ProjectionEvent = z.object({ points: z.array(ProjectedPoint) });
+export type ProjectionEvent = z.infer<typeof ProjectionEvent>;
+
 // ---- View props (JS -> native) + event handlers (native -> JS) ----
 
 type NativeEvent<T> = { nativeEvent: T };
@@ -65,10 +84,14 @@ export interface ExpoArViewProps extends ViewProps {
   planeDetection?: PlaneDetection;
   depthEnabled?: boolean;
   debug?: boolean;
+  // Opt-in per-frame projection of anchors to screen space (drives object-pinned labels).
+  // Off by default so non-measurement screens pay zero per-frame cost.
+  emitProjections?: boolean;
   onReady?: (e: NativeEvent<ReadyEvent>) => void;
   onTrackingStateChange?: (e: NativeEvent<TrackingStateEvent>) => void;
   onTap?: (e: NativeEvent<TapEvent>) => void;
   onAnchorsChange?: (e: NativeEvent<AnchorsEvent>) => void;
+  onProjection?: (e: NativeEvent<ProjectionEvent>) => void;
   onError?: (e: NativeEvent<ErrorEvent>) => void;
 }
 
@@ -91,4 +114,9 @@ export interface ArViewHandle {
   // so the core stays use-case-agnostic.
   attachModel?(anchorId: string, modelUri: string): Promise<void>;
   detachModel?(anchorId: string): Promise<void>;
+
+  // One-shot world→screen projection (same coordinate space as ProjectedPoint). Optional
+  // for the same reason as the rendering primitives — the web stub exposes none. For
+  // continuous tracking prefer the `emitProjections` prop + onProjection event.
+  worldToScreen?(transform: Transform): Promise<ProjectedPoint | null>;
 }

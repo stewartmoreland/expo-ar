@@ -28,11 +28,21 @@ const norm = (a: Vec3): number => Math.hypot(a.x, a.y, a.z);
 /** Straight-line distance (meters) between two world points. */
 export const distance = (a: Vec3, b: Vec3): number => norm(sub(a, b));
 
+/**
+ * Per-edge lengths (meters) of the open path through `pts` — `n-1` values for `n` points.
+ * The tape's running segment readout and the per-segment labels both derive from this, so
+ * there's a single source of edge lengths shared with `perimeter`.
+ */
+export const segments = (pts: Vec3[]): number[] => {
+  const out: number[] = [];
+  for (let i = 0; i < pts.length - 1; i++) out.push(distance(pts[i], pts[i + 1]));
+  return out;
+};
+
 /** Total path length (meters). `closed` adds the segment back to the first point. */
 export const perimeter = (pts: Vec3[], closed = true): number => {
   if (pts.length < 2) return 0;
-  let total = 0;
-  for (let i = 0; i < pts.length - 1; i++) total += distance(pts[i], pts[i + 1]);
+  let total = segments(pts).reduce((a, b) => a + b, 0);
   // Only close polygons (3+ points); a 2-point "polygon" must not double back.
   if (closed && pts.length > 2) total += distance(pts[pts.length - 1], pts[0]);
   return total;
@@ -78,9 +88,13 @@ export const formatArea = (m2: number | null, u: Unit): string =>
  */
 export const measure = (anchors: Anchor[]) => {
   const points = anchors.map((a) => positionOf(a.transform));
+  const segs = segments(points);
   return {
     points,
-    distance: points.length >= 2 ? distance(points[points.length - 2], points[points.length - 1]) : null,
+    // Per-edge lengths (meters), aligned to the gaps between consecutive points. The HUD
+    // pins one label per entry at the midpoint of points[i]..points[i+1].
+    segments: segs,
+    distance: points.length >= 2 ? segs[segs.length - 1] : null,
     perimeter: points.length >= 2 ? perimeter(points, false) : null,
     area: points.length >= 3 ? area(points) : null,
   };

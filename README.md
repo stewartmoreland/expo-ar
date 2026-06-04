@@ -64,6 +64,7 @@ Detect support at runtime and branch; never assume LiDAR/Depth is present.
 | `planeDetection` | `"none" \| "horizontal" \| "vertical" \| "both"`| Plane detection mode |
 | `depthEnabled`   | `boolean`                                       | Enable LiDAR/Depth (off by default) |
 | `debug`          | `boolean`                                       | Draw detected planes / feature points |
+| `emitProjections`| `boolean`                                       | Opt-in: stream anchor → screen positions each frame via `onProjection` (drives object-pinned 2D labels) |
 
 **Ref functions (JS → native, via view ref):**
 
@@ -75,6 +76,7 @@ Detect support at runtime and branch; never assume LiDAR/Depth is present.
 | `listAnchors()`     | Current anchors |
 | `pause()` / `resume()` / `reset()` | Session lifecycle control (`reset` clears anchors and restarts tracking) |
 | `snapshot()`        | `base64` image |
+| `worldToScreen(transform)` | `{ id, x, y, inFront } \| null` — project a 3D point to screen coordinates (the inverse of `raycast`) |
 
 **Events (native → JS):**
 
@@ -84,6 +86,7 @@ Detect support at runtime and branch; never assume LiDAR/Depth is present.
 | `onTrackingStateChange` | `{ state }` |
 | `onTap`                 | `{ x, y }` |
 | `onAnchorsChange`       | `{ anchors: [{ id, transform, type }] }` |
+| `onProjection`          | `{ points: [{ id, x, y, inFront }] }` — per-frame, only while `emitProjections` is set |
 | `onError`               | `{ code, message }` |
 
 Everything a feature needs is composed from these: measurement = raycast on tap → store world points → compute geometry; object placement = `addAnchor` → attach a model to the anchor. Poses are 4×4 transforms serialized as a 16-number, column-major array; all math is in **meters**.
@@ -99,7 +102,7 @@ npm run lint       # eslint
 npm test           # jest
 ```
 
-The [`example/`](./example) app is the development harness. Run it as a development build on a **physical device** — AR does not work in a simulator/emulator.
+The [`example/`](./example) app is the development harness — two worked features (measurement with object-pinned tape labels, and tap-to-place) composed on the same core. See [`example/README.md`](./example/README.md) for how to build and run the demo. Run it as a development build on a **physical device** — AR does not work in a simulator/emulator.
 
 ## Contributing
 
