@@ -20,6 +20,10 @@ for (const target of SUBTARGETS) {
   if (fs.existsSync(targetDir) && fs.existsSync(path.join(targetDir, 'tsconfig.json'))) {
     console.log(`Building ${target}`);
     fs.rmSync(path.join(targetDir, 'build'), { recursive: true, force: true });
+    // Drop the incremental cache too: `tsc --build` trusts tsbuildinfo and skips
+    // emit if it looks up-to-date, which would leave `build/` empty after the
+    // rm above — and ship a broken package (app.plugin.js requires plugin/build).
+    fs.rmSync(path.join(targetDir, 'tsconfig.tsbuildinfo'), { force: true });
     run('tsc', ['--build', targetDir]);
   }
 }
