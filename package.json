@@ -1,5 +1,5 @@
 {
-  "name": "expo-ar",
+  "name": "@stewmore/expo-ar",
   "version": "0.1.0",
   "description": "Augmented Reality module bridging iOS ARKit and Android ARCore",
   "main": "build/index.js",
@@ -11,7 +11,8 @@
     "test": "node internal/module_scripts/test.js",
     "prepare": "node internal/module_scripts/prepare.js",
     "open:ios": "node internal/module_scripts/open-ios.js",
-    "open:android": "node internal/module_scripts/open-android.js"
+    "open:android": "node internal/module_scripts/open-android.js",
+    "release": "release-it"
   },
   "keywords": [
     "react-native",
@@ -37,11 +38,15 @@
   "author": "Stewart Moreland <stewartmoreland@users.noreply.github.com> (https://github.com/stewartmoreland)",
   "license": "MIT",
   "homepage": "https://github.com/stewartmoreland/expo-ar#readme",
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@babel/core": "^7.26.0",
+    "@release-it/conventional-changelog": "^11.0.1",
     "@testing-library/react-native": "^13.3.3",
     "@types/jest": "^29.2.1",
     "@types/react": "~19.1.1",
@@ -54,6 +59,7 @@
     "prettier": "^3.0.0",
     "react-native": "0.82.1",
     "react-test-renderer": "19.2.7",
+    "release-it": "^20.2.0",
     "typescript": "^5.9.2"
   },
   "jest": {

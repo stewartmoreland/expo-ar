@@ -52,12 +52,12 @@ The reticle is dead-center; in Measure it shows the next point number. Aim it at
 
 ## How it maps to the module API
 
-The example is pure composition over the generic core — it adds no session/tracking code:
+The example is pure composition over the generic core — it adds no session/tracking code. Each mode is a thin hook over the same primitives: [`features/useArMeasure.tsx`](./features/useArMeasure.tsx) and [`features/useArPlacement.tsx`](./features/useArPlacement.tsx).
 
-- **Tap to place** → `onTap` → `addAnchor(x, y)` raycasts and creates an anchor; `onAnchorsChange` feeds the JS state.
+- **Tap to place** → `onTap` → `addAnchor(x, y)` raycasts and creates an anchor; `onAnchorsChange` feeds the JS state. Placement then calls `attachModel(id, 'builtin:cube')` to render a cube at the anchor (see `useArPlacement`).
 - **Measurement** is derived in pure TS from the anchor positions (see [`features/measurement.ts`](./features/measurement.ts)); distances are in meters, formatted only at the UI edge.
 - **Object-pinned labels** use the opt-in `emitProjections` prop + `onProjection` event: the native side projects each anchor to screen space every frame, and the HUD pins a glass length chip at each segment's midpoint (see [`features/MeasurementLabels.tsx`](./features/MeasurementLabels.tsx)).
-- **Undo / Clear** reuse the core's `removeAnchor` / `reset`.
+- **Undo / Clear** reuse the core's `removeAnchor` / `reset` (placement detaches each model before removing its anchor).
 
 ## Troubleshooting
 
