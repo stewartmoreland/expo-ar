@@ -66,19 +66,25 @@ without a full build:
 cd example && npx expo-modules-autolinking resolve -p apple   # should list 'ar-detectors'
 ```
 
-### Android: verify the `:expo-ar` project path
+### Android: verify the `:stewmore-expo-ar` project path
 
 `android/build.gradle` here depends on the expo-ar module for the seam types:
 
 ```gradle
-implementation project(':expo-ar')
+implementation project(':stewmore-expo-ar')
 ```
 
-Expo autolinking includes expo-ar as a sibling Gradle project named after its unscoped package
-name. If a build can't resolve `:expo-ar`, list the real name and adjust:
+Scoped npm package `@stewmore/expo-ar` autolinks as Gradle project `stewmore-expo-ar` (slash →
+hyphen). If a build can't resolve it, verify the autolinked name:
 
 ```sh
-cd example/android && ./gradlew projects   # find the expo-ar project path
+cd example && npx expo-modules-autolinking resolve -p android | grep stewmore-expo-ar
+```
+
+Fallback — list all Gradle projects after prebuild:
+
+```sh
+cd example/android && ./gradlew projects
 ```
 
 ## Testing with a real model — where to drop it

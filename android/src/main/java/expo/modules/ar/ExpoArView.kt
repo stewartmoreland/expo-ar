@@ -383,8 +383,16 @@ open class ExpoArView(context: Context, appContext: AppContext) :
       } else {
         null
       }
-    onGeoStateChange(mapOf("state" to geoStateOf(earth), "pose" to pose))
+    onGeoStateChange(geoStateEventPayload(geoStateOf(earth), pose))
   }
+
+  // EventDispatcher expects Map<String, Any>; nullable pose must be explicit null (iOS NSNull parity).
+  @Suppress("UNCHECKED_CAST")
+  private fun geoStateEventPayload(state: String, pose: Map<String, Any?>?): Map<String, Any> =
+    hashMapOf<String, Any?>(
+      "state" to state,
+      "pose" to pose,
+    ) as Map<String, Any>
 
   // Earth state → contract GeoTrackingState. No earth yet → still spinning up ("initializing").
   private fun geoStateOf(earth: Earth?): String {

@@ -90,7 +90,7 @@ npx expo run:ios             # physical device — ARKit doesn't run in a simula
 
 **Confirm it loaded.** The Detect HUD shows `detector: YOLOv3` when your model is live, or `detector: fallback (animals)` when none was found (only cats/dogs detect, via `VNRecognizeAnimalsRequest`). The Xcode console logs `[ArDetectors] active detector: …` plus any Vision errors or wrong-model-type warnings. The processor searches both the framework and app **main bundle** for the model — necessary because the CocoaPods static-framework resource bundle lands in the main bundle. Detection assumes **portrait** orientation.
 
-> First-time setup pulls `@shopify/react-native-skia` (the box overlay) via `npm install`, and `expo prebuild` autolinks the `ar-detectors` local module. On Android, if Gradle can't resolve `:expo-ar`, run `./gradlew projects` in `example/android` and adjust the path in the local module's `build.gradle` (see its README).
+> First-time setup pulls `@shopify/react-native-skia` (the box overlay) via `npm install`, and `expo prebuild` autolinks the `ar-detectors` local module. On Android, if Gradle can't resolve `:stewmore-expo-ar`, run `./gradlew projects` in `example/android` and adjust the path in the local module's `build.gradle` (see its README).
 
 ## Troubleshooting
 
