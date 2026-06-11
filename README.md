@@ -265,9 +265,11 @@ the build/lint/test gate) runs `release-it --ci`, which:
 - commits + tags `vX.Y.Z`, creates the GitHub release, and publishes to npm.
 
 Use Conventional Commit messages (or squash-merge PRs with a conventional title) so the bump
-is correct. **Setup:** add an automation-scoped `NPM_TOKEN` as a repository secret; the
-built-in `GITHUB_TOKEN` handles the tag, push, and GitHub release. To preview locally:
-`npx release-it --ci --dry-run`.
+is correct. Publishing uses [npm Trusted Publisher](https://docs.npmjs.com/trusted-publishers)
+(OIDC via GitHub Actions); the built-in `GITHUB_TOKEN` handles the tag, push, and GitHub
+release. After a release lands on `main`, **rebase open PRs onto the latest `main`** before
+merging — merging a branch cut before a release commit can orphan the version bump and break
+the next publish. To preview locally: `npx release-it --ci --dry-run`.
 
 ## Contributing
 

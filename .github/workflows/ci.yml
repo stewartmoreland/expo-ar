@@ -45,6 +45,7 @@ jobs:
         with:
           ref: main # check out the branch (not a detached SHA) so release-it can commit + push back
           fetch-depth: 0 # release-it needs full history + tags to compute the bump
+          fetch-tags: true
       - uses: actions/setup-node@v4
         with:
           node-version: 22 # >= 22.14.0 required for npm Trusted Publisher OIDC
@@ -58,7 +59,23 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Check version alignment with npm
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          NPM_VERSION=$(npm view @stewmore/expo-ar version 2>/dev/null || echo "none")
+          if [ "$NPM_VERSION" != "none" ] && [ "$(printf '%s\n' "$NPM_VERSION" "$PKG_VERSION" | sort -V | tail -1)" = "$NPM_VERSION" ] && [ "$NPM_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::npm ($NPM_VERSION) is ahead of package.json ($PKG_VERSION). Merge the orphaned release commit before re-running."
+            exit 1
+          fi
       - name: release-it (bump, changelog, tag, GitHub release, npm publish)
         run: npx release-it --ci
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify release landed on main
+        run: |
+          git fetch origin main --tags
+          git checkout main
+          git pull origin main
+          TAG=$(git describe --tags --abbrev=0)
+          VERSION=$(node -p "require('./package.json').version")
+          test "v$VERSION" = "$TAG" || (echo "::error::main ($VERSION) does not match latest tag ($TAG)" && exit 1)
