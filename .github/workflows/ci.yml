@@ -73,9 +73,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Verify release landed on main
         run: |
-          git fetch origin main --tags
-          git checkout main
-          git pull origin main
-          TAG=$(git describe --tags --abbrev=0)
           VERSION=$(node -p "require('./package.json').version")
-          test "v$VERSION" = "$TAG" || (echo "::error::main ($VERSION) does not match latest tag ($TAG)" && exit 1)
+          git fetch origin main --tags
+          REMOTE_VERSION=$(git show origin/main:package.json | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")
+          REMOTE_SHA=$(git rev-parse origin/main)
+          TAG_SHA=$(git rev-parse "v${VERSION}^{commit}")
+          if [ "$REMOTE_VERSION" != "$VERSION" ]; then
+            echo "::error::origin/main package.json is $REMOTE_VERSION, expected $VERSION. Release commit may not have been pushed — merge tag v${VERSION} onto main."
+            exit 1
+          fi
+          if [ "$REMOTE_SHA" != "$TAG_SHA" ]; then
+            echo "::error::origin/main ($REMOTE_SHA) is not at tag v${VERSION} ($TAG_SHA). Release commit may not have been pushed — merge tag v${VERSION} onto main."
+            exit 1
+          fi

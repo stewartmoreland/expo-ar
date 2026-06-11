@@ -6,7 +6,9 @@
     "tagAnnotation": "Release v${version}",
     "requireBranch": "main",
     "requireCommits": true,
-    "requireCommitsFail": false
+    "requireCommitsFail": false,
+    "push": true,
+    "pushArgs": ["--follow-tags", "origin", "main"]
   },
   "npm": {
     "publish": true,
