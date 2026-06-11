@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.1](https://github.com/stewartmoreland/expo-ar/compare/v0.2.0...v0.2.1) (2026-06-11)
+
+### Bug Fixes
+
+* update ARCore dependency and improve geo state handling ([dbb68b9](https://github.com/stewartmoreland/expo-ar/commit/dbb68b909770935429c694d6b8de8e11b756dd73))
+
 ## 0.2.0 (2026-06-04)
 
 ### Features
