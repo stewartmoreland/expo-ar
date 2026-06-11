@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name           = 'ExpoAr'
-  s.version        = '0.2.1'
+  s.version        = '0.2.2'
   s.summary        = 'Augmented Reality module bridging iOS ARKit and Android ARCore'
   s.description    = 'A single React Native AR view backed by ARKit (iOS) and ARCore (Android) behind one shared TypeScript contract.'
   s.author         = 'Stewart Moreland'

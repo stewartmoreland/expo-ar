@@ -9,7 +9,7 @@ import {
 const PLUGIN_NAME = 'expo-ar';
 // Bump when the native mods below change; used only for run-once de-duping. Kept in
 // sync with package.json by convention (not imported to avoid a rootDir escape).
-const PLUGIN_VERSION = '0.2.1';
+const PLUGIN_VERSION = '0.2.2';
 
 const DEFAULT_CAMERA_PERMISSION = 'This app uses the camera for augmented reality.';
 const DEFAULT_LOCATION_PERMISSION =
