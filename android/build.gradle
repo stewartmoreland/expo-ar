@@ -22,7 +22,9 @@ android {
 dependencies {
   // ARCore session/tracking/anchors. Pinned to the version SceneView 2.3.0 is built
   // against, so the two resolve without conflict.
-  implementation "com.google.ar:core:1.48.0"
+  // api (not implementation): ExpoArFrameProcessor exposes com.google.ar.core.Frame on the public
+  // seam, so any consumer implementing it (e.g. ar-detectors) needs ARCore on its compile classpath.
+  api "com.google.ar:core:1.48.0"
 
   // SceneView ARSceneView — the ARCore-backed Filament renderer for the AR view.
   // 2.3.0 targets Kotlin 2.0.21, matching Expo SDK 56's default Kotlin version.

@@ -11,6 +11,8 @@ android {
   namespace 'expo.modules.ardetectors'
   defaultConfig {
     minSdkVersion 24
+    versionCode 1
+    versionName "1.0.0"
   }
   lintOptions {
     abortOnError false
@@ -18,10 +20,10 @@ android {
 }
 
 dependencies {
-  // The CV-fusion seam (ExpoArFrameProcessor + ExpoArDetectorRegistry) lives in the expo-ar module.
-  // Expo autolinking includes it as a sibling Gradle project named after the unscoped package name.
-  // If a build fails to resolve this, run `./gradlew projects` after prebuild and adjust the path.
-  implementation project(':expo-ar')
+  // CV-fusion seam (ExpoArFrameProcessor + ExpoArDetectorRegistry) lives in the parent expo-ar module.
+  // Scoped npm name @stewmore/expo-ar autolinks as Gradle project stewmore-expo-ar (slash → hyphen).
+  // Verify: npx expo-modules-autolinking resolve -p android | grep stewmore-expo-ar
+  implementation project(':stewmore-expo-ar')
 
   // ML Kit on-device object detection — bundled default model (zero asset, coarse 5-category labels).
   // Swap for a custom LiteRT/TFLite model via ObjectDetectorOptions for production accuracy.
