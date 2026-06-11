@@ -71,6 +71,8 @@ jobs:
         run: npx release-it --ci
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push release commit to main
+        run: git push origin main --follow-tags
       - name: Verify release landed on main
         run: |
           VERSION=$(node -p "require('./package.json').version")

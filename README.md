@@ -269,7 +269,9 @@ is correct. Publishing uses [npm Trusted Publisher](https://docs.npmjs.com/trust
 (OIDC via GitHub Actions); the built-in `GITHUB_TOKEN` handles the tag, push, and GitHub
 release. After a release lands on `main`, **rebase open PRs onto the latest `main`** before
 merging — merging a branch cut before a release commit can orphan the version bump and break
-the next publish. To preview locally: `npx release-it --ci --dry-run`.
+the next publish. **Branch protection:** allow `github-actions[bot]` to bypass rules and
+push directly to `main` (release-it commits with `[skip ci]`); otherwise tags and npm
+publish succeed but `main` stays behind. To preview locally: `npx release-it --ci --dry-run`.
 
 ## Contributing
 
